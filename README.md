@@ -1,15 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/mnemo-Structured%20Fact%20Memory-2F81F7?style=for-the-badge&labelColor=0d1117" alt="mnemo">
-</p>
-
-<h1 align="center">mnemo</h1>
-
-<p align="center">
-  <strong>Structured fact memory MCP server for AI coding assistants</strong>
-</p>
-
-<p align="center">
-  SQLite + FTS5 · Trust Scoring · Entity Graph · Contradiction Detection · Bilingual Retrieval
+  <img src="./banner.png" alt="mnemo" width="600">
 </p>
 
 <p align="center">

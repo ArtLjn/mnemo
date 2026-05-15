@@ -1,15 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/mnemo-结构化事实记忆-2F81F7?style=for-the-badge&labelColor=0d1117" alt="mnemo">
-</p>
-
-<h1 align="center">mnemo</h1>
-
-<p align="center">
-  <strong>面向 AI 编程助手的结构化事实记忆 MCP 服务器</strong>
-</p>
-
-<p align="center">
-  SQLite + FTS5 · 信任评分 · 实体图谱 · 矛盾检测 · 中英双语检索
+  <img src="./banner.png" alt="mnemo" width="600">
 </p>
 
 <p align="center">
