@@ -1,7 +1,7 @@
 {
   "name": "@artljn/mnemo",
   "version": "0.1.1",
-  "description": "Structured fact memory MCP server for AI coding assistants",
+  "description": "Structured fact memory MCP server — SQLite + FTS5, trust scoring, entity graph, bilingual retrieval for Claude Code & Codex",
   "type": "module",
   "main": "dist/server.js",
   "bin": {
@@ -28,11 +28,19 @@
   },
   "keywords": [
     "mcp",
+    "mcp-server",
     "memory",
     "fact-store",
     "sqlite",
+    "fts5",
     "ai",
     "claude",
-    "codex"
+    "claude-code",
+    "codex",
+    "trust-scoring",
+    "entity-graph",
+    "bilingual",
+    "persistent-memory",
+    "typescript"
   ]
 }
