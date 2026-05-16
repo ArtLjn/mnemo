@@ -10,6 +10,8 @@
 import type Database from 'better-sqlite3'
 import type { Fact, FactCategory, ScoredFact, Contradiction, SearchOptions, ContradictOptions, RetrieverOptions } from './types.js'
 import { MemoryStore } from './store.js'
+import { QueryCache } from './cache.js'
+import { PerfMetrics } from './metrics.js'
 
 // 中文字符级匹配的虚词集合（这些单字太常见，不参与字符交叉匹配）
 const CN_OVERLAP_STOP = new Set([
@@ -31,6 +33,10 @@ export class FactRetriever {
   private ftsWeight: number
   private jaccardWeight: number
   private halfLifeDays: number
+  /** 查询缓存（60s TTL，进程内 Map） */
+  private cache: QueryCache
+  /** 性能指标（MNEMO_DEBUG=1 时生效） */
+  private metrics: PerfMetrics
   /** category → 高频 tag 集合（从事实库自动学习，惰性初始化） */
   private _categoryTagMap: Map<FactCategory, Set<string>> | null = null
   /** 中英术语对列表（从事实库自动学习，惰性初始化） */
@@ -44,13 +50,34 @@ export class FactRetriever {
     this.ftsWeight = options?.ftsWeight ?? 0.5
     this.jaccardWeight = options?.jaccardWeight ?? 0.5
     this.halfLifeDays = options?.temporalDecayHalfLife ?? 0
+    this.cache = new QueryCache()
+    this.metrics = new PerfMetrics()
+  }
+
+  /** 获取缓存实例（供 server.ts 写操作时调用 cache.clear()） */
+  getCache(): QueryCache {
+    return this.cache
+  }
+
+  /** 获取性能指标实例（供调试接口使用） */
+  getMetrics(): PerfMetrics {
+    return this.metrics
   }
 
   /** 主搜索：FTS5 → LIKE → 字符交叉 → 分类推断 → Jaccard → 信任评分 → 时间衰减 */
   search(query: string, options?: SearchOptions): ScoredFact[] {
+    const startTime = performance.now()
     const minTrust = options?.minTrust ?? 0.3
     const limit = options?.limit ?? 10
     const category = options?.category
+
+    // 缓存检查
+    const cacheKey = this.cache.makeKey({ action: 'search', query, category, minTrust, limit })
+    const cached = this.cache.get(cacheKey)
+    if (cached) {
+      this.metrics.record({ action: 'search', durationMs: performance.now() - startTime, resultCount: cached.length, cacheHit: true })
+      return cached
+    }
 
     // 查询双语扩展：中文术语追加英文，英文术语追加中文
     const expandedQuery = this.expandQueryBilingually(query)
@@ -137,23 +164,51 @@ export class FactRetriever {
       this.trackRetrieval(results)
     }
 
+    // 缓存存储 + 指标记录
+    this.cache.set(cacheKey, results)
+    this.metrics.record({ action: 'search', durationMs: performance.now() - startTime, resultCount: results.length, cacheHit: false, retrievalPath: 'FTS5' })
     return results
   }
 
   /** 实体探测：查询某实体关联的所有事实 */
   probe(entity: string, options?: SearchOptions): ScoredFact[] {
+    const startTime = performance.now()
     const limit = options?.limit ?? 10
-    const facts = this.store.getFactsByEntity(entity, options?.category, limit)
-    return facts.map((f, i) => ({
+    const category = options?.category
+
+    // 缓存检查
+    const cacheKey = this.cache.makeKey({ action: 'probe', entity, category, limit })
+    const cached = this.cache.get(cacheKey)
+    if (cached) {
+      this.metrics.record({ action: 'probe', durationMs: performance.now() - startTime, resultCount: cached.length, cacheHit: true })
+      return cached
+    }
+
+    const facts = this.store.getFactsByEntity(entity, category, limit)
+    const results = facts.map((f, i) => ({
       ...f,
       score: f.trustScore * (1 - i * 0.05), // 按信任评分排序并给微小梯度
     }))
+
+    // 缓存存储 + 指标记录
+    this.cache.set(cacheKey, results)
+    this.metrics.record({ action: 'probe', durationMs: performance.now() - startTime, resultCount: results.length, cacheHit: false, retrievalPath: 'entity' })
+    return results
   }
 
   /** 实体关联：查找与某实体共享上下文的其他事实 */
   related(entity: string, options?: SearchOptions): ScoredFact[] {
+    const startTime = performance.now()
     const limit = options?.limit ?? 10
     const category = options?.category
+
+    // 缓存检查
+    const cacheKey = this.cache.makeKey({ action: 'related', entity, category, limit })
+    const cached = this.cache.get(cacheKey)
+    if (cached) {
+      this.metrics.record({ action: 'related', durationMs: performance.now() - startTime, resultCount: cached.length, cacheHit: true })
+      return cached
+    }
 
     // Step 1: 获取实体关联的 fact_id 列表
     const entityFactsSql = `
@@ -162,7 +217,12 @@ export class FactRetriever {
       WHERE e.name LIKE ?
     `
     const entityFactRows = this.db.prepare(entityFactsSql).all(entity) as Array<{ fact_id: number }>
-    if (entityFactRows.length === 0) return []
+    if (entityFactRows.length === 0) {
+      const emptyResults: ScoredFact[] = []
+      this.cache.set(cacheKey, emptyResults)
+      this.metrics.record({ action: 'related', durationMs: performance.now() - startTime, resultCount: 0, cacheHit: false, retrievalPath: 'entity' })
+      return emptyResults
+    }
 
     const factIds = entityFactRows.map(r => r.fact_id)
 
@@ -175,7 +235,12 @@ export class FactRetriever {
         AND e.name NOT LIKE ?
     `).all(...factIds, entity) as Array<{ name: string }>
 
-    if (otherEntityRows.length === 0) return []
+    if (otherEntityRows.length === 0) {
+      const emptyResults: ScoredFact[] = []
+      this.cache.set(cacheKey, emptyResults)
+      this.metrics.record({ action: 'related', durationMs: performance.now() - startTime, resultCount: 0, cacheHit: false, retrievalPath: 'entity' })
+      return emptyResults
+    }
 
     // Step 3: 获取关联这些其他实体但不包含原始事实的 facts
     const otherEntities = otherEntityRows.map(r => r.name)
@@ -210,7 +275,7 @@ export class FactRetriever {
       created_at: string; updated_at: string;
     }>
 
-    return rows.map((r, i) => ({
+    const results = rows.map((r, i) => ({
       factId: r.fact_id,
       content: r.content,
       category: r.category as FactCategory,
@@ -223,20 +288,44 @@ export class FactRetriever {
       updatedAt: r.updated_at,
       score: r.trust_score * (1 - i * 0.05),
     }))
+
+    // 缓存存储 + 指标记录
+    this.cache.set(cacheKey, results)
+    this.metrics.record({ action: 'related', durationMs: performance.now() - startTime, resultCount: results.length, cacheHit: false, retrievalPath: 'entity' })
+    return results
   }
 
   /** 多实体推理：查找同时关联多个实体的事实 */
   reason(entities: string[], options?: SearchOptions): ScoredFact[] {
+    const startTime = performance.now()
     if (entities.length === 0) return []
-    const facts = this.store.getFactsByEntities(entities, options?.category, options?.limit ?? 10)
-    return facts.map((f, i) => ({
+
+    const category = options?.category
+    const limit = options?.limit ?? 10
+
+    // 缓存检查
+    const cacheKey = this.cache.makeKey({ action: 'reason', entities, category, limit })
+    const cached = this.cache.get(cacheKey)
+    if (cached) {
+      this.metrics.record({ action: 'reason', durationMs: performance.now() - startTime, resultCount: cached.length, cacheHit: true })
+      return cached
+    }
+
+    const facts = this.store.getFactsByEntities(entities, category, limit)
+    const results = facts.map((f, i) => ({
       ...f,
       score: f.trustScore * (1 - i * 0.05),
     }))
+
+    // 缓存存储 + 指标记录
+    this.cache.set(cacheKey, results)
+    this.metrics.record({ action: 'reason', durationMs: performance.now() - startTime, resultCount: results.length, cacheHit: false, retrievalPath: 'entity' })
+    return results
   }
 
-  /** 矛盾检测：实体重叠 + 内容差异 */
+  /** 矛盾检测：实体重叠 + 内容差异（仅指标，不缓存 — 返回类型不同） */
   contradict(options?: ContradictOptions): Contradiction[] {
+    const startTime = performance.now()
     const threshold = options?.threshold ?? 0.3
     const limit = options?.limit ?? 10
     const category = options?.category
@@ -326,7 +415,11 @@ export class FactRetriever {
     }
 
     contradictions.sort((a, b) => b.contradictionScore - a.contradictionScore)
-    return contradictions.slice(0, limit)
+    const results = contradictions.slice(0, limit)
+
+    // 指标记录（无缓存 — Contradiction[] 不适用于 ScoredFact 缓存）
+    this.metrics.record({ action: 'contradict', durationMs: performance.now() - startTime, resultCount: results.length, cacheHit: false, retrievalPath: 'O(n²)' })
+    return results
   }
 
   // ------------------------------------------------------------------

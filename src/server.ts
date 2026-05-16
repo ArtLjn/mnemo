@@ -27,11 +27,11 @@ const FACT_STORE_DESCRIPTION = `结构化事实记忆系统（SQLite+FTS5 索引
 
 const factStoreSchema = {
   action: z.enum(['add', 'search', 'probe', 'related', 'reason', 'contradict', 'update', 'remove', 'list']),
-  content: z.string().optional().describe("事实内容（'add' 必需）"),
+  content: z.union([z.string(), z.array(z.string())]).optional().describe("事实内容（'add' 必需，支持批量）"),
   query: z.string().optional().describe("搜索查询（'search' 必需）"),
   entity: z.string().optional().describe("实体名（'probe'/'related' 使用）"),
   entities: z.array(z.string()).optional().describe("实体列表（'reason' 使用）"),
-  fact_id: z.number().optional().describe("事实 ID（'update'/'remove' 使用）"),
+  fact_id: z.union([z.number(), z.array(z.number())]).optional().describe("事实 ID（'update'/'remove' 使用，支持批量）"),
   category: z.enum(['identity', 'coding_style', 'tool_pref', 'workflow', 'general']).optional(),
   tags: z.string().optional().describe('逗号分隔标签'),
   trust_delta: z.number().optional().describe("'update' 的信任调整值"),
@@ -76,20 +76,33 @@ server.tool(
       switch (a.action) {
         case 'add': {
           if (!a.content) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Missing required argument: content' }) }] }
-          const similar = store.findSimilarFact(a.content, category) ?? store.findSimilarFact(a.content)
-          let warnings: string[] | undefined
-          const scan = fullSecurityScan(a.content)
-          if (scan.warnings.length > 0 || scan.hasPii) warnings = [...scan.warnings]
+          const contents = Array.isArray(a.content) ? a.content : [a.content]
+          const results: Array<{ fact_id: number; status: string; reason?: string; category?: string; contradicted_demoted?: number; warnings?: string[] }> = []
 
-          if (similar) {
-            store.updateFact(similar.factId, { content: a.content, tags: a.tags, trustDelta: 0.05 })
-            const demoted = store.demoteContradictingFacts(similar.factId, a.content, category)
-            return { content: [{ type: 'text' as const, text: JSON.stringify({ fact_id: similar.factId, status: 'updated', reason: 'similar_fact_merged', ...(demoted > 0 ? { contradicted_demoted: demoted } : {}), ...(warnings ? { warnings } : {}) }) }] }
+          for (const content of contents) {
+            if (!content || !content.trim()) {
+              results.push({ fact_id: -1, status: 'error', reason: 'empty content' })
+              continue
+            }
+            const similar = store.findSimilarFact(content, category) ?? store.findSimilarFact(content)
+            let warnings: string[] | undefined
+            const scan = fullSecurityScan(content)
+            if (scan.warnings.length > 0 || scan.hasPii) warnings = [...scan.warnings]
+
+            if (similar) {
+              store.updateFact(similar.factId, { content, tags: a.tags, trustDelta: 0.05 })
+              const demoted = store.demoteContradictingFacts(similar.factId, content, category)
+              results.push({ fact_id: similar.factId, status: 'updated', reason: 'similar_fact_merged', ...(demoted > 0 ? { contradicted_demoted: demoted } : {}), ...(warnings ? { warnings } : {}) })
+            } else {
+              const factId = store.addFact(content, category, a.tags ?? '')
+              const demoted = store.demoteContradictingFacts(factId, content, category)
+              results.push({ fact_id: factId, status: 'added', category, ...(demoted > 0 ? { contradicted_demoted: demoted } : {}), ...(warnings ? { warnings } : {}) })
+            }
           }
 
-          const factId = store.addFact(a.content, category, a.tags ?? '')
-          const demoted = store.demoteContradictingFacts(factId, a.content, category)
-          return { content: [{ type: 'text' as const, text: JSON.stringify({ fact_id: factId, status: 'added', category, ...(demoted > 0 ? { contradicted_demoted: demoted } : {}), ...(warnings ? { warnings } : {}) }) }] }
+          retriever.getCache().clear()
+          const response = Array.isArray(a.content) ? results : results[0]
+          return { content: [{ type: 'text' as const, text: JSON.stringify(response) }] }
         }
 
         case 'search': {
@@ -124,14 +137,18 @@ server.tool(
 
         case 'update': {
           if (!a.fact_id) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Missing required argument: fact_id' }) }] }
-          const updated = store.updateFact(a.fact_id, { content: a.content, tags: a.tags, category, trustDelta: a.trust_delta })
+          const updated = store.updateFact(a.fact_id as number, { content: a.content as string | undefined, tags: a.tags, category, trustDelta: a.trust_delta })
+          retriever.getCache().clear()
           return { content: [{ type: 'text' as const, text: JSON.stringify({ updated }) }] }
         }
 
         case 'remove': {
           if (!a.fact_id) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Missing required argument: fact_id' }) }] }
-          const removed = store.removeFact(a.fact_id)
-          return { content: [{ type: 'text' as const, text: JSON.stringify({ removed }) }] }
+          const ids = Array.isArray(a.fact_id) ? a.fact_id : [a.fact_id]
+          const results = ids.map(id => ({ fact_id: id, removed: store.removeFact(id) }))
+          retriever.getCache().clear()
+          const response = Array.isArray(a.fact_id) ? results : results[0]
+          return { content: [{ type: 'text' as const, text: JSON.stringify(response) }] }
         }
 
         case 'list': {
