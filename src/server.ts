@@ -7,6 +7,7 @@ import { homedir } from 'node:os'
 import { z } from 'zod/v4'
 import { MemoryStore } from './store.js'
 import { FactRetriever } from './retriever.js'
+import { ResourceManager } from './resources.js'
 import { fullSecurityScan } from './security.js'
 import type { FactStoreArgs, FactFeedbackArgs, FactCategory } from './types.js'
 
@@ -64,6 +65,10 @@ store.auditContradictions()
 // -- MCP Server --
 const server = new McpServer({ name: 'mnemo-mcp', version: '0.1.0' })
 
+// -- MCP Resources: 会话预热注入 --
+const resourceManager = new ResourceManager(store)
+resourceManager.registerResources(server)
+
 server.tool(
   'fact_store',
   FACT_STORE_DESCRIPTION,
@@ -101,6 +106,7 @@ server.tool(
           }
 
           retriever.getCache().clear()
+          resourceManager.invalidate()
           const response = Array.isArray(a.content) ? results : results[0]
           return { content: [{ type: 'text' as const, text: JSON.stringify(response) }] }
         }
@@ -139,6 +145,7 @@ server.tool(
           if (!a.fact_id) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Missing required argument: fact_id' }) }] }
           const updated = store.updateFact(a.fact_id as number, { content: a.content as string | undefined, tags: a.tags, category, trustDelta: a.trust_delta })
           retriever.getCache().clear()
+          resourceManager.invalidate()
           return { content: [{ type: 'text' as const, text: JSON.stringify({ updated }) }] }
         }
 
@@ -147,6 +154,7 @@ server.tool(
           const ids = Array.isArray(a.fact_id) ? a.fact_id : [a.fact_id]
           const results = ids.map(id => ({ fact_id: id, removed: store.removeFact(id) }))
           retriever.getCache().clear()
+          resourceManager.invalidate()
           const response = Array.isArray(a.fact_id) ? results : results[0]
           return { content: [{ type: 'text' as const, text: JSON.stringify(response) }] }
         }
