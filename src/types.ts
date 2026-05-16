@@ -90,6 +90,8 @@ export interface DreamReport {
   reclassified: number
   deleted: number
   mergeDetails: Array<{ kept: number; removed: number; similarity: number }>
+  fallback?: boolean
+  fallbackReason?: string
   health: {
     total: number
     avg_trust: number
@@ -105,4 +107,18 @@ export interface CompactFactResult {
   category: FactCategory
   trustScore: number
   score: number
+}
+
+/** LLM 配置 */
+export interface LLMConfig {
+  baseUrl: string
+  model: string
+  apiKey?: string
+  temperature: number
+}
+
+/** LLM 聊天消息 */
+export interface LLMMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
 }
