@@ -309,16 +309,16 @@ describe('dream - merge', () => {
 })
 
 describe('dream - reclassify', () => {
-  it('moves miscategorized facts by keywords', () => {
-    const id = store.addFact('编码规范：文件不超过 500 行', 'identity')
+  it('moves miscategorized facts from general to correct category', () => {
+    const id = store.addFact('编码规范：文件不超过 500 行', 'general')
     const result = store.reclassifyFacts()
     expect(result).toBeGreaterThanOrEqual(1)
     const row = store.connection.prepare('SELECT category FROM facts WHERE fact_id = ?').get(id) as any
     expect(row.category).toBe('coding_style')
   })
 
-  it('skips correctly categorized facts', () => {
-    store.addFact('用户偏好使用 VS Code 编辑器', 'tool_pref')
+  it('skips already categorized facts', () => {
+    store.addFact('编码规范：文件不超过 500 行', 'coding_style')
     const result = store.reclassifyFacts()
     expect(result).toBe(0)
   })
@@ -331,7 +331,7 @@ describe('dream - runDream', () => {
     // 重叠 fact（触发合并）
     store.addFact('用户偏好使用 TypeScript 开发前端代码', 'coding_style')
     // 分类错误 fact（触发重分类）
-    store.addFact('编码规范：文件不超过 500 行', 'identity')
+    store.addFact('编码规范：文件不超过 500 行', 'general')
 
     const report = await store.runDream({ skipBackup: true })
     expect(report.compressed).toBeGreaterThanOrEqual(0)

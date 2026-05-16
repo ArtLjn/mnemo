@@ -875,7 +875,7 @@ export class MemoryStore {
             const tokensB = this.tokenizeForDedup(rows[j].content)
             const sim = this.jaccardSimilarity(tokensA, tokensB)
 
-            if (sim > 0.6) {
+            if (sim > 0.4) {
               const aHighFreq = rows[i].retrieval_count > 100
               const bHighFreq = rows[j].retrieval_count > 100
 
@@ -914,14 +914,14 @@ export class MemoryStore {
         { keywords: ['偏好', 'VS Code', '编辑器', 'IDE', '快捷键'], target: 'tool_pref' },
       ]
 
+      // 只从 general 分类移动，避免已分类 fact 被反复震荡
       const rows = this.db.prepare(
-        'SELECT fact_id, content, category FROM facts'
+        "SELECT fact_id, content, category FROM facts WHERE category = 'general'"
       ).all() as Array<{ fact_id: number; content: string; category: string }>
 
       let reclassified = 0
       for (const row of rows) {
         for (const rule of rules) {
-          if (rule.target === row.category) continue
           if (rule.keywords.some(kw => row.content.includes(kw))) {
             this.db.prepare("UPDATE facts SET category = ?, updated_at = datetime('now', 'localtime') WHERE fact_id = ?").run(rule.target, row.fact_id)
             reclassified++
