@@ -113,31 +113,25 @@ export class FactRetriever {
       return []
     }
 
-    // Stage 2-4: Jaccard 重排序 + 信任评分 + 时间衰减
-    // 动态权重：短查询偏 FTS，长查询偏 Jaccard
+    // Stage 2-4: Jaccard 重排序 + 信任评分 + 时间衰减 + length penalty
     const queryTokens = this.tokenize(searchQuery)
-    const tokenCount = queryTokens.size
-    const ftsWeight = tokenCount <= 3 ? 0.7 : 0.3
-    const jaccardWeight = tokenCount <= 3 ? 0.3 : 0.7
 
     const scored: ScoredFact[] = []
 
     for (const fact of candidates) {
-      const contentTokens = this.tokenize(fact.content)
+      // summary 优先用于匹配
+      const matchText = fact.summary ?? fact.content
+      const matchTokens = this.tokenize(matchText)
       const tagTokens = this.tokenize(fact.tags)
-      const allTokens = new Set([...contentTokens, ...tagTokens])
+      const allTokens = new Set([...matchTokens, ...tagTokens])
 
       const jaccard = this.jaccardSimilarity(queryTokens, allTokens)
-      // Containment: 查询 token 在事实 token 中的覆盖率
       const qInF = this.containmentScore(queryTokens, allTokens)
-
-      // 混合相似度：Jaccard + Containment（简化版，移除 keywordScore）
       const similarity = 0.3 * jaccard + 0.7 * qInF
       const ftsScore = fact.ftsRank
 
-      // 综合评分
-      const relevance = ftsWeight * ftsScore + jaccardWeight * similarity
-
+      // 静态权重 0.5/0.5（回退 v3 动态权重）
+      const relevance = 0.5 * ftsScore + 0.5 * similarity
       let score = relevance * fact.trustScore
 
       // 时间衰减
@@ -145,37 +139,22 @@ export class FactRetriever {
         score *= this.temporalDecay(fact.updatedAt || fact.createdAt)
       }
 
+      // Length penalty：基于 matchText 长度
+      score *= Math.min(1.0, 300 / matchText.length)
+
       scored.push({ ...fact, score })
     }
 
     scored.sort((a, b) => b.score - a.score)
 
-    // 相关性门控：过滤低相关性结果
-    const RELEVANCE_THRESHOLD = 0.15
-    const gated = scored.filter(s => s.score >= RELEVANCE_THRESHOLD)
-    const pool = gated.length > 0 ? gated : scored
-
-    // 内容去重：Jaccard > 0.7 的只保留高分
-    const results: ScoredFact[] = []
-    for (const candidate of pool) {
-      let isDuplicate = false
-      const candidateTokens = this.tokenize(candidate.content)
-      for (const kept of results) {
-        const keptTokens = this.tokenize(kept.content)
-        if (this.jaccardSimilarity(candidateTokens, keptTokens) > 0.7) {
-          isDuplicate = true
-          break
-        }
-      }
-      if (!isDuplicate) {
-        results.push(candidate)
-        if (results.length >= limit) break
-      }
-    }
+    // 取 limit 条（不再做 relevance gate 和 content dedup）
+    const results = scored.slice(0, limit)
 
     // 检索追踪：递增 retrieval_count + top3 信任刷新
     if (results.length > 0) {
       this.trackRetrieval(results)
+      // 记录检索日志
+      this.store.logRetrieval(searchQuery, results.map(r => ({ id: r.factId, score: Math.round(r.score * 1000) / 1000 })))
     }
 
     // 缓存存储 + 指标记录
@@ -625,8 +604,8 @@ export class FactRetriever {
     const conditions: string[] = []
     const params: unknown[] = []
     for (const word of words) {
-      conditions.push('(f.content LIKE ? OR f.tags LIKE ?)')
-      params.push(`%${word}%`, `%${word}%`)
+      conditions.push('(f.content LIKE ? OR f.tags LIKE ? OR f.summary LIKE ?)')
+      params.push(`%${word}%`, `%${word}%`, `%${word}%`)
     }
 
     // 中文子串分解：将中文查询拆为 2~3 字滑动窗口，追加 LIKE 条件
@@ -638,14 +617,14 @@ export class FactRetriever {
         // 2-gram
         for (let i = 0; i < seg.length - 1; i++) {
           const bigram = seg.slice(i, i + 2)
-          conditions.push('(f.content LIKE ? OR f.tags LIKE ?)')
-          params.push(`%${bigram}%`, `%${bigram}%`)
+          conditions.push('(f.content LIKE ? OR f.tags LIKE ? OR f.summary LIKE ?)')
+          params.push(`%${bigram}%`, `%${bigram}%`, `%${bigram}%`)
         }
         // 3-gram（覆盖更长的短语匹配）
         for (let i = 0; i < seg.length - 2; i++) {
           const trigram = seg.slice(i, i + 3)
-          conditions.push('(f.content LIKE ? OR f.tags LIKE ?)')
-          params.push(`%${trigram}%`, `%${trigram}%`)
+          conditions.push('(f.content LIKE ? OR f.tags LIKE ? OR f.summary LIKE ?)')
+          params.push(`%${trigram}%`, `%${trigram}%`, `%${trigram}%`)
         }
       }
     }
@@ -662,7 +641,7 @@ export class FactRetriever {
 
     const sql = `
       SELECT f.fact_id, f.content, f.category, f.tags, f.keywords,
-             f.trust_score, f.retrieval_count, f.helpful_count,
+             f.summary, f.trust_score, f.retrieval_count, f.helpful_count,
              f.created_at, f.updated_at
       FROM facts f
       WHERE (${conditionsSql})
@@ -674,6 +653,7 @@ export class FactRetriever {
 
     const rows = this.db.prepare(sql).all(...params) as Array<{
       fact_id: number; content: string; category: string; tags: string; keywords: string;
+      summary: string | null;
       trust_score: number; retrieval_count: number; helpful_count: number;
       created_at: string; updated_at: string;
     }>
@@ -685,7 +665,7 @@ export class FactRetriever {
       category: r.category as FactCategory,
       tags: r.tags,
       keywords: r.keywords ?? '[]',
-      summary: (r as any).summary ?? null,
+      summary: r.summary ?? null,
       trustScore: r.trust_score,
       retrievalCount: r.retrieval_count,
       helpfulCount: r.helpful_count,
