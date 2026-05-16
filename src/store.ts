@@ -11,8 +11,9 @@
 
 import Database from 'better-sqlite3'
 import type { Statement } from 'better-sqlite3'
-import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { mkdirSync, copyFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
 import { SCHEMA } from './schema.js'
 import type { Fact, FactCategory } from './types.js'
 
@@ -839,6 +840,44 @@ export class MemoryStore {
       low_helpful_rate: lowHelpfulRate,
       aging_candidates: agingCandidates,
     }
+  }
+
+  /** Dream 前备份数据库 */
+  backupDatabase(): string {
+    const backupDir = join(homedir(), '.mnemo', 'backup')
+    mkdirSync(backupDir, { recursive: true })
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const backupPath = join(backupDir, `dream-${timestamp}.db`)
+    copyFileSync(this.db.name, backupPath)
+    return backupPath
+  }
+
+  /** 压缩长 fact：content > 200 字且无 summary 的，自动提取前 2 句作为 summary */
+  compressLongFacts(): number {
+    const rows = this.db.prepare(
+      "SELECT fact_id, content FROM facts WHERE length(content) > 200 AND (summary IS NULL OR summary = '')"
+    ).all() as Array<{ fact_id: number; content: string }>
+
+    let compressed = 0
+    for (const row of rows) {
+      const summary = this.extractSummary(row.content)
+      if (summary) {
+        this.db.prepare('UPDATE facts SET summary = ? WHERE fact_id = ?').run(summary, row.fact_id)
+        compressed++
+      }
+    }
+    return compressed
+  }
+
+  /** 从 content 提取前 2 个完整句子（总长 ≤ 150 字） */
+  private extractSummary(content: string): string | null {
+    const sentences = content.split(/[。\n.]/).map(s => s.trim()).filter(s => s.length > 0)
+    if (sentences.length === 0) return null
+    let summary = sentences[0]
+    if (sentences.length > 1 && summary.length + sentences[1].length <= 148) {
+      summary += '。' + sentences[1]
+    }
+    return summary.length <= 150 ? summary : summary.slice(0, 147) + '...'
   }
 
   /** 获取数据库连接（供 FactRetriever 直接使用） */

@@ -230,3 +230,41 @@ describe('runAudit', () => {
     expect(report.long_without_summary.length).toBeGreaterThanOrEqual(1)
   })
 })
+
+describe('dream - backup', () => {
+  it('creates backup before dream', () => {
+    store.addFact('test fact for backup', 'general')
+    const result = store.backupDatabase()
+    expect(result).toBeTruthy()
+    expect(result).toContain('dream-')
+    expect(result).toContain('.db')
+  })
+})
+
+describe('dream - compress', () => {
+  it('generates summary for long facts without summary', () => {
+    const longContent = '用户偏好使用 TypeScript 开发前端项目。偏好 React 框架进行组件化开发。' + '额外补充说明'.repeat(50)
+    store.addFact(longContent, 'coding_style')
+    const result = store.compressLongFacts()
+    expect(result).toBeGreaterThanOrEqual(1)
+    const row = store.connection.prepare('SELECT summary FROM facts WHERE content = ?').get(longContent) as any
+    expect(row.summary).toBeTruthy()
+    expect(row.summary.length).toBeLessThanOrEqual(150)
+    expect(row.summary).toContain('TypeScript')
+  })
+
+  it('skips facts with existing summary', () => {
+    const longContent = 'x'.repeat(300)
+    const id = store.addFact(longContent, 'general')
+    store.connection.prepare('UPDATE facts SET summary = ? WHERE fact_id = ?').run('existing summary', id)
+    const result = store.compressLongFacts()
+    const row = store.connection.prepare('SELECT summary FROM facts WHERE fact_id = ?').get(id) as any
+    expect(row.summary).toBe('existing summary')
+  })
+
+  it('skips short facts', () => {
+    store.addFact('short fact', 'general')
+    const result = store.compressLongFacts()
+    expect(result).toBe(0)
+  })
+})
