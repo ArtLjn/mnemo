@@ -12,6 +12,7 @@ import type { Fact, FactCategory, ScoredFact, Contradiction, SearchOptions, Cont
 import { MemoryStore } from './store.js'
 import { QueryCache } from './cache.js'
 import { PerfMetrics } from './metrics.js'
+import { refineQuery } from './refine.js'
 
 // 中文字符级匹配的虚词集合（这些单字太常见，不参与字符交叉匹配）
 const CN_OVERLAP_STOP = new Set([
@@ -65,14 +66,23 @@ export class FactRetriever {
   }
 
   /** 主搜索：FTS5 → LIKE → 字符交叉 → 分类推断 → Jaccard → 信任评分 → 时间衰减 */
-  search(query: string, options?: SearchOptions): ScoredFact[] {
+  search(query: string, options?: SearchOptions & { skipRefine?: boolean }): ScoredFact[] {
     const startTime = performance.now()
     const minTrust = options?.minTrust ?? 0.3
     const limit = options?.limit ?? 10
     const category = options?.category
 
+    // 查询提炼（除非显式跳过）
+    let searchQuery = query
+    if (!options?.skipRefine) {
+      const refined = refineQuery(query)
+      if (refined?.query) {
+        searchQuery = refined.query
+      }
+    }
+
     // 缓存检查
-    const cacheKey = this.cache.makeKey({ action: 'search', query, category, minTrust, limit })
+    const cacheKey = this.cache.makeKey({ action: 'search', query: searchQuery, category, minTrust, limit })
     const cached = this.cache.get(cacheKey)
     if (cached) {
       this.metrics.record({ action: 'search', durationMs: performance.now() - startTime, resultCount: cached.length, cacheHit: true })
@@ -80,7 +90,7 @@ export class FactRetriever {
     }
 
     // 查询双语扩展：中文术语追加英文，英文术语追加中文
-    const expandedQuery = this.expandQueryBilingually(query)
+    const expandedQuery = this.expandQueryBilingually(searchQuery)
 
     // Stage 1: FTS5 候选集，空时逐级 fallback（使用双语扩展后的查询）
     let candidates = this.ftsCandidates(expandedQuery, category, minTrust, limit * 3)
@@ -93,18 +103,22 @@ export class FactRetriever {
     if (candidates.length === 0) {
       // 分类推断 fallback（仅无 category 过滤时生效）
       if (!category) {
-        const inferred = this.categoryInferFallback(query, minTrust, limit)
+        const inferred = this.categoryInferFallback(searchQuery, minTrust, limit)
         if (inferred.length > 0) return inferred
       }
       // 个人/身份相关的短查询触发 trust fallback
-      if (this.isPersonalQuery(query)) {
+      if (this.isPersonalQuery(searchQuery)) {
         return this.trustFallback(category, minTrust, limit)
       }
       return []
     }
 
     // Stage 2-4: Jaccard 重排序 + 信任评分 + 时间衰减
-    const queryTokens = this.tokenize(query)
+    // 动态权重：短查询偏 FTS，长查询偏 Jaccard
+    const queryTokens = this.tokenize(searchQuery)
+    const tokenCount = queryTokens.size
+    const ftsWeight = tokenCount <= 3 ? 0.7 : 0.3
+    const jaccardWeight = tokenCount <= 3 ? 0.3 : 0.7
 
     const scored: ScoredFact[] = []
 
@@ -122,7 +136,7 @@ export class FactRetriever {
       const ftsScore = fact.ftsRank
 
       // 综合评分
-      const relevance = this.ftsWeight * ftsScore + this.jaccardWeight * similarity
+      const relevance = ftsWeight * ftsScore + jaccardWeight * similarity
 
       let score = relevance * fact.trustScore
 
@@ -136,28 +150,28 @@ export class FactRetriever {
 
     scored.sort((a, b) => b.score - a.score)
 
-    // Category 多样性：同类事实只保留评分最高的，避免 general 黑洞效应
-    const seenCategories = new Set<FactCategory>()
-    const diverse: ScoredFact[] = []
-    for (const s of scored) {
-      if (!seenCategories.has(s.category)) {
-        seenCategories.add(s.category)
-        diverse.push(s)
-      }
-      if (diverse.length >= limit) break
-    }
-    // 补位：如果去重后不足 limit，从原排序列表中补（允许同类多次出现）
-    if (diverse.length < limit) {
-      const diverseIds = new Set(diverse.map(f => f.factId))
-      for (const s of scored) {
-        if (!diverseIds.has(s.factId)) {
-          diverse.push(s)
-          if (diverse.length >= limit) break
+    // 相关性门控：过滤低相关性结果
+    const RELEVANCE_THRESHOLD = 0.15
+    const gated = scored.filter(s => s.score >= RELEVANCE_THRESHOLD)
+    const pool = gated.length > 0 ? gated : scored
+
+    // 内容去重：Jaccard > 0.7 的只保留高分
+    const results: ScoredFact[] = []
+    for (const candidate of pool) {
+      let isDuplicate = false
+      const candidateTokens = this.tokenize(candidate.content)
+      for (const kept of results) {
+        const keptTokens = this.tokenize(kept.content)
+        if (this.jaccardSimilarity(candidateTokens, keptTokens) > 0.7) {
+          isDuplicate = true
+          break
         }
       }
+      if (!isDuplicate) {
+        results.push(candidate)
+        if (results.length >= limit) break
+      }
     }
-
-    const results = diverse
 
     // 检索追踪：递增 retrieval_count + top3 信任刷新
     if (results.length > 0) {
