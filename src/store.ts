@@ -63,9 +63,11 @@ interface FactRow {
   category: string
   tags: string
   keywords: string
+  summary?: string | null
   trust_score: number
   retrieval_count: number
   helpful_count: number
+  last_retrieved_at?: string | null
   created_at: string
   updated_at: string
 }
@@ -110,10 +112,58 @@ export class MemoryStore {
 
   /** 增量迁移：添加新列（已存在则跳过） */
   private migrateSchema(): void {
+    const addColumn = (table: string, column: string, def: string): void => {
+      try {
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`)
+      } catch { /* 列已存在 */ }
+    }
+
     // keywords 列（v2）
-    try {
-      this.db.exec('ALTER TABLE facts ADD COLUMN keywords TEXT DEFAULT \'[]\'')
-    } catch { /* 列已存在 */ }
+    addColumn('facts', 'keywords', "TEXT DEFAULT '[]'")
+    // summary 列
+    addColumn('facts', 'summary', 'TEXT DEFAULT NULL')
+    // last_retrieved_at 列
+    addColumn('facts', 'last_retrieved_at', 'TEXT DEFAULT NULL')
+
+    // FTS5 重建：检查 facts_fts 是否包含 summary 列
+    const ftsCols = this.db.pragma('table_info(facts_fts)') as Array<{ name: string }>
+    const hasSummary = ftsCols.some(c => c.name === 'summary')
+    if (!hasSummary) {
+      // DROP 旧 FTS5 表和触发器，重建含 summary 的新版本
+      this.db.exec(`
+        DROP TABLE IF EXISTS facts_fts;
+        DROP TRIGGER IF EXISTS facts_ai;
+        DROP TRIGGER IF EXISTS facts_ad;
+        DROP TRIGGER IF EXISTS facts_au;
+      `)
+      // 重建 FTS5 虚拟表（含 summary）
+      this.db.exec(`
+        CREATE VIRTUAL TABLE facts_fts
+          USING fts5(content, tags, summary, content=facts, content_rowid=fact_id);
+      `)
+      // 重填充
+      this.db.exec(`
+        INSERT INTO facts_fts(rowid, content, tags, summary)
+          SELECT fact_id, content, tags, COALESCE(summary, '') FROM facts;
+      `)
+      // 重建触发器
+      this.db.exec(`
+        CREATE TRIGGER facts_ai AFTER INSERT ON facts BEGIN
+          INSERT INTO facts_fts(rowid, content, tags, summary)
+            VALUES (new.fact_id, new.content, new.tags, COALESCE(new.summary, ''));
+        END;
+        CREATE TRIGGER facts_ad AFTER DELETE ON facts BEGIN
+          INSERT INTO facts_fts(facts_fts, rowid, content, tags, summary)
+            VALUES ('delete', old.fact_id, old.content, old.tags, COALESCE(old.summary, ''));
+        END;
+        CREATE TRIGGER facts_au AFTER UPDATE ON facts BEGIN
+          INSERT INTO facts_fts(facts_fts, rowid, content, tags, summary)
+            VALUES ('delete', old.fact_id, old.content, old.tags, COALESCE(old.summary, ''));
+          INSERT INTO facts_fts(rowid, content, tags, summary)
+            VALUES (new.fact_id, new.content, new.tags, COALESCE(new.summary, ''));
+        END;
+      `)
+    }
   }
 
   private prepareStatements(): void {
@@ -361,8 +411,8 @@ export class MemoryStore {
     params.push(limit)
 
     const sql = `
-      SELECT fact_id, content, category, tags, keywords, trust_score,
-             retrieval_count, helpful_count, created_at, updated_at
+      SELECT fact_id, content, category, tags, keywords, summary, trust_score,
+             retrieval_count, helpful_count, last_retrieved_at, created_at, updated_at
       FROM facts
       WHERE trust_score >= ?
         ${categoryClause}
@@ -410,8 +460,8 @@ export class MemoryStore {
     params.push(limit)
 
     const sql = `
-      SELECT f.fact_id, f.content, f.category, f.tags, f.keywords, f.trust_score,
-             f.retrieval_count, f.helpful_count, f.created_at, f.updated_at
+      SELECT f.fact_id, f.content, f.category, f.tags, f.keywords, f.summary, f.trust_score,
+             f.retrieval_count, f.helpful_count, f.last_retrieved_at, f.created_at, f.updated_at
       FROM facts f
       JOIN fact_entities fe ON f.fact_id = fe.fact_id
       JOIN entities e ON fe.entity_id = e.entity_id
@@ -445,8 +495,8 @@ export class MemoryStore {
     params.push(limit)
 
     const sql = `
-      SELECT f.fact_id, f.content, f.category, f.tags, f.keywords, f.trust_score,
-             f.retrieval_count, f.helpful_count, f.created_at, f.updated_at
+      SELECT f.fact_id, f.content, f.category, f.tags, f.keywords, f.summary, f.trust_score,
+             f.retrieval_count, f.helpful_count, f.last_retrieved_at, f.created_at, f.updated_at
       FROM facts f
       WHERE f.fact_id IN (${intersects})
         ${categoryClause}
@@ -795,9 +845,11 @@ export class MemoryStore {
       category: row.category as FactCategory,
       tags: row.tags,
       keywords: row.keywords,
+      summary: (row as any).summary ?? null,
       trustScore: row.trust_score,
       retrievalCount: row.retrieval_count,
       helpfulCount: row.helpful_count,
+      lastRetrievedAt: (row as any).last_retrieved_at ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }

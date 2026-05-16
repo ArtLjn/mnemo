@@ -8,9 +8,11 @@ export interface Fact {
   category: FactCategory
   tags: string
   keywords: string
+  summary: string | null
   trustScore: number
   retrievalCount: number
   helpfulCount: number
+  lastRetrievedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -53,7 +55,7 @@ export interface RetrieverOptions {
 
 /** fact_store 工具调用参数 */
 export interface FactStoreArgs {
-  action: 'add' | 'search' | 'probe' | 'related' | 'reason' | 'contradict' | 'update' | 'remove' | 'list'
+  action: 'add' | 'search' | 'probe' | 'related' | 'reason' | 'contradict' | 'update' | 'remove' | 'list' | 'learn' | 'audit'
   content?: string | string[]
   query?: string
   entity?: string
@@ -61,6 +63,7 @@ export interface FactStoreArgs {
   fact_id?: number | number[]
   category?: string
   tags?: string
+  summary?: string
   trust_delta?: number
   min_trust?: number
   limit?: number

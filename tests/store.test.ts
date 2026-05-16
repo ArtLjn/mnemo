@@ -102,3 +102,25 @@ describe('MemoryStore', () => {
     })
   })
 })
+
+describe('schema migration', () => {
+  it('has summary column on facts table', () => {
+    const cols = store.connection.pragma('table_info(facts)') as Array<{ name: string }>
+    const colNames = cols.map(c => c.name)
+    expect(colNames).toContain('summary')
+    expect(colNames).toContain('last_retrieved_at')
+  })
+
+  it('has retrieval_log table', () => {
+    const tables = store.connection.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='retrieval_log'"
+    ).get()
+    expect(tables).toBeTruthy()
+  })
+
+  it('summary defaults to null', () => {
+    const id = store.addFact('test summary fact', 'general')
+    const row = store.connection.prepare('SELECT summary FROM facts WHERE fact_id = ?').get(id) as { summary: string | null }
+    expect(row.summary).toBeNull()
+  })
+})
