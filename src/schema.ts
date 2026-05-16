@@ -46,9 +46,9 @@ CREATE INDEX IF NOT EXISTS idx_entities_name  ON entities(name);
 CREATE INDEX IF NOT EXISTS idx_fact_entities_entity ON fact_entities(entity_id);
 CREATE INDEX IF NOT EXISTS idx_retrieval_log_ts ON retrieval_log(timestamp);
 
--- FTS5 全文索引（含 summary 列）
+-- FTS5 全文索引（trigram tokenizer 支持中文子串匹配）
 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts
-  USING fts5(content, tags, summary, content=facts, content_rowid=fact_id);
+  USING fts5(content, tags, summary, content=facts, content_rowid=fact_id, tokenize='trigram');
 
 -- FTS5 同步触发器：插入
 CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN

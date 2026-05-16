@@ -76,7 +76,25 @@ process.nextTick(() => {
 })
 
 // -- MCP Server --
-const server = new McpServer({ name: 'mnemo-mcp', version: '0.1.0' })
+// 动态生成 instructions：将 identity resource 中的角色设定作为 system prompt 指令注入
+function buildInstructions(): string {
+  try {
+    const rm = new ResourceManager(store)
+    const result = rm.readCategory('identity')
+    const identityText = result.contents[0]?.text ?? ''
+    if (identityText.length > 10) {
+      return identityText
+    }
+  } catch {
+    // fallback：无 identity 数据时不注入
+  }
+  return ''
+}
+
+const server = new McpServer(
+  { name: 'mnemo-mcp', version: '0.1.0' },
+  { instructions: buildInstructions() },
+)
 
 // -- MCP Resources: 会话预热注入 --
 const resourceManager = new ResourceManager(store)

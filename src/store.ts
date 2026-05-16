@@ -136,10 +136,10 @@ export class MemoryStore {
         DROP TRIGGER IF EXISTS facts_ad;
         DROP TRIGGER IF EXISTS facts_au;
       `)
-      // 重建 FTS5 虚拟表（含 summary）
+      // 重建 FTS5 虚拟表（含 summary，使用 trigram tokenizer 支持中文子串）
       this.db.exec(`
         CREATE VIRTUAL TABLE facts_fts
-          USING fts5(content, tags, summary, content=facts, content_rowid=fact_id);
+          USING fts5(content, tags, summary, content=facts, content_rowid=fact_id, tokenize='trigram');
       `)
       // 重填充
       this.db.exec(`
@@ -743,7 +743,9 @@ export class MemoryStore {
 
       // Rate-based adjustment (需要 30+ 次检索)
       if (row.retrieval_count > 30) {
-        if (rate < 0.05) {
+        // 高频检索保护：检索 >100 次说明被持续需要，feedback 少不代表无用
+        const highFrequencyProtected = row.retrieval_count > 100
+        if (rate < 0.05 && !highFrequencyProtected) {
           const newTrust = clampTrust(row.trust_score * 0.9)
           this.db.prepare('UPDATE facts SET trust_score = ? WHERE fact_id = ?').run(newTrust, row.fact_id)
           demoted++

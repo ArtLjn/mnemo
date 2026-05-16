@@ -19,32 +19,12 @@ const CLAUDE_MD_PATH = join(CLAUDE_DIR, 'CLAUDE.md')
 const SETTINGS_PATH = join(CLAUDE_DIR, 'settings.json')
 
 const MEMORY_RULES = `
-# 记忆系统使用规则
 
-你有 mnemo 记忆工具（fact_store / fact_feedback），必须按以下规则使用：
+# mnemo 记忆系统
 
-## 规则 1：会话预热（自动）
-会话启动时，mnemo-mcp 的 MCP Resource 会自动注入全局记忆到 system context。
-你不需要主动调用 fact_store(search) 来获取高频记忆。
-
-## 规则 2：按需补充查询
-仅在以下情况调用 \`fact_store(action="search")\`：
-- 用户消息涉及个人偏好/习惯/工具选择且预热中未覆盖
-- 用户明确查询记忆（"我之前说过什么""按我的习惯"）
-- 技术选型时需要确认用户偏好
-
-不触发查询的情况：
-- 纯操作指令（"运行测试""git commit"）
-- 通用技术问题（"Promise 怎么用"）
-- 代码审查/解释请求
-
-## 规则 3：写入记忆
-用户说"记住"、"记下来"时，调用 \`fact_store(action="add", content="...", category="...")\`。
-- 先 search 检查是否已有相似事实，有则 update
-- category：identity / coding_style / tool_pref / workflow / general
-
-## 规则 4：反馈强化
-成功使用某条记忆时，调用 \`fact_feedback(action="helpful", fact_id=...)\`。
+- 身份问题（"你是谁"等）→ 先 fact_store(search, query="角色设定")，按设定回答
+- 用户说"记住"→ fact_store(add)，先 search 去重
+- 成功使用记忆 → fact_feedback(helpful, fact_id)
 `
 
 const MCP_TOOLS = [

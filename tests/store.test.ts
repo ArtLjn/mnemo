@@ -153,13 +153,29 @@ describe('logRetrieval', () => {
 })
 
 describe('runLearning', () => {
-  it('demotes high retrieval low helpful facts', () => {
+  it('demotes moderate retrieval low helpful facts', () => {
     const id = store.addFact('demote me', 'general')
-    store.connection.prepare('UPDATE facts SET retrieval_count = 100, helpful_count = 2, trust_score = 1.0 WHERE fact_id = ?').run(id)
+    store.connection.prepare('UPDATE facts SET retrieval_count = 50, helpful_count = 1, trust_score = 1.0 WHERE fact_id = ?').run(id)
     const result = store.runLearning()
     const row = store.connection.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(id) as any
     expect(row.trust_score).toBeLessThan(1.0)
     expect(result.demoted).toBeGreaterThanOrEqual(1)
+  })
+
+  it('protects high frequency facts from demotion', () => {
+    const id = store.addFact('高频角色设定', 'identity')
+    store.connection.prepare('UPDATE facts SET retrieval_count = 200, helpful_count = 2, trust_score = 0.9 WHERE fact_id = ?').run(id)
+    store.runLearning()
+    const row = store.connection.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(id) as any
+    expect(row.trust_score).toBe(0.9)
+  })
+
+  it('still demotes moderate frequency facts with low trust', () => {
+    const id = store.addFact('中频低信任', 'general')
+    store.connection.prepare('UPDATE facts SET retrieval_count = 50, helpful_count = 0, trust_score = 0.3 WHERE fact_id = ?').run(id)
+    store.runLearning()
+    const row = store.connection.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(id) as any
+    expect(row.trust_score).toBeLessThan(0.3)
   })
 
   it('promotes high helpful rate facts', () => {

@@ -437,15 +437,19 @@ export class FactRetriever {
     const ftsParts: string[] = []
 
     for (const word of parts) {
-      ftsParts.push(`"${word}"`)
-      // 对中文部分追加 bigram
-      const cnChars = word.match(/[\u4e00-\u9fff]+/g)
+      const cnChars = word.match(/[一-鿿]+/g)
       if (cnChars) {
+        // 中文部分：trigram tokenizer 需要至少 3 字符
         for (const seg of cnChars) {
-          for (let i = 0; i < seg.length - 1; i++) {
-            ftsParts.push(seg.slice(i, i + 2))
+          if (seg.length >= 3) ftsParts.push(seg)
+          // 提取 trigram（3 字符子串）
+          for (let i = 0; i <= seg.length - 3; i++) {
+            ftsParts.push(seg.slice(i, i + 3))
           }
         }
+      } else {
+        // 非中文部分：用引号包裹（短语匹配），至少 1 字符
+        if (word.length >= 1) ftsParts.push(`"${word}"`)
       }
     }
 
