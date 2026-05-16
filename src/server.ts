@@ -9,7 +9,7 @@ import { MemoryStore } from './store.js'
 import { FactRetriever } from './retriever.js'
 import { ResourceManager } from './resources.js'
 import { fullSecurityScan } from './security.js'
-import type { FactStoreArgs, FactFeedbackArgs, FactCategory } from './types.js'
+import type { FactStoreArgs, FactFeedbackArgs, FactCategory, ScoredFact, CompactFactResult } from './types.js'
 
 const FACT_STORE_DESCRIPTION = `结构化事实记忆系统（SQLite+FTS5 索引）。支持读写。
 
@@ -27,7 +27,7 @@ const FACT_STORE_DESCRIPTION = `结构化事实记忆系统（SQLite+FTS5 索引
 写入时先 search 检查是否已存在相似事实。identity/coding_style/tool_pref/workflow/general → 全局库，project → 项目库。`
 
 const factStoreSchema = {
-  action: z.enum(['add', 'search', 'probe', 'related', 'reason', 'contradict', 'update', 'remove', 'list', 'learn', 'audit']),
+  action: z.enum(['add', 'search', 'probe', 'related', 'reason', 'contradict', 'update', 'remove', 'list', 'learn', 'audit', 'dream']),
   content: z.union([z.string(), z.array(z.string())]).optional().describe("事实内容（'add' 必需，支持批量）"),
   summary: z.string().optional().describe('超长事实的摘要（检索用 summary 匹配）'),
   query: z.string().optional().describe("搜索查询（'search' 必需）"),
@@ -50,6 +50,16 @@ function resolveCategory(category?: string): FactCategory {
   if (!category) return 'general'
   const valid: FactCategory[] = ['identity', 'coding_style', 'tool_pref', 'workflow', 'general']
   return valid.includes(category as FactCategory) ? (category as FactCategory) : 'general'
+}
+
+function toCompactResult(f: ScoredFact): CompactFactResult {
+  return {
+    factId: f.factId,
+    display: f.summary ?? (f.content.length > 100 ? f.content.slice(0, 100) + '...' : f.content),
+    category: f.category,
+    trustScore: Math.round(f.trustScore * 100) / 100,
+    score: Math.round(f.score * 1000) / 1000,
+  }
 }
 
 const minTrust = 0.3
@@ -154,26 +164,30 @@ server.tool(
         case 'search': {
           if (!a.query) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Missing required argument: query' }) }] }
           const results = retriever.search(a.query, { category: a.category ? category : undefined, minTrust: a.min_trust ?? minTrust, limit: a.limit ?? 10 })
-          return { content: [{ type: 'text' as const, text: JSON.stringify({ results, count: results.length }) }] }
+          const compact = results.map(toCompactResult)
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ results: compact, count: compact.length }) }] }
         }
 
         case 'probe': {
           if (!a.entity) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Missing required argument: entity' }) }] }
           const results = retriever.probe(a.entity, { minTrust: a.min_trust ?? minTrust, limit: a.limit ?? 10 })
-          return { content: [{ type: 'text' as const, text: JSON.stringify({ results, count: results.length }) }] }
+          const compact = results.map(toCompactResult)
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ results: compact, count: compact.length }) }] }
         }
 
         case 'related': {
           if (!a.entity) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Missing required argument: entity' }) }] }
           const results = retriever.related(a.entity, { minTrust: a.min_trust ?? minTrust, limit: a.limit ?? 10 })
-          return { content: [{ type: 'text' as const, text: JSON.stringify({ results, count: results.length }) }] }
+          const compact = results.map(toCompactResult)
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ results: compact, count: compact.length }) }] }
         }
 
         case 'reason': {
           const entities = a.entities ?? []
           if (entities.length === 0) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: "reason requires 'entities' list" }) }] }
           const results = retriever.reason(entities, { minTrust: a.min_trust ?? minTrust, limit: a.limit ?? 10 })
-          return { content: [{ type: 'text' as const, text: JSON.stringify({ results, count: results.length }) }] }
+          const compact = results.map(toCompactResult)
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ results: compact, count: compact.length }) }] }
         }
 
         case 'contradict': {
@@ -209,6 +223,13 @@ server.tool(
 
         case 'audit': {
           const report = store.runAudit()
+          return { content: [{ type: 'text' as const, text: JSON.stringify(report) }] }
+        }
+
+        case 'dream': {
+          const report = await store.runDream()
+          retriever.getCache().clear()
+          resourceManager.invalidate()
           return { content: [{ type: 'text' as const, text: JSON.stringify(report) }] }
         }
 
