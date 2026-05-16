@@ -24,7 +24,7 @@ mnemo gives your AI assistant a **searchable, structured memory layer** that per
 
 ```bash
 # Install
-npm install -g @artljn/mnemo
+npm install -g @morningljn/mnemo
 
 # One-command setup (register MCP + write rules + set permissions)
 mnemo-init

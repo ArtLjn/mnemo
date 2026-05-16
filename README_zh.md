@@ -24,7 +24,7 @@ mnemo 为你的 AI 助手提供**可搜索、结构化的记忆层**，跨会话
 
 ```bash
 # 安装
-npm install -g @artljn/mnemo
+npm install -g @morningljn/mnemo
 
 # 一键配置（注册 MCP + 写入规则 + 设置权限）
 mnemo-init
