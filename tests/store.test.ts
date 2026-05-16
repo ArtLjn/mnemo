@@ -124,3 +124,93 @@ describe('schema migration', () => {
     expect(row.summary).toBeNull()
   })
 })
+
+describe('logRetrieval', () => {
+  it('writes retrieval log with results', () => {
+    const id = store.addFact('test fact for logging', 'general')
+    store.logRetrieval('test query', [{ id, score: 0.8 }])
+    const rows = store.connection.prepare('SELECT * FROM retrieval_log').all() as Array<any>
+    expect(rows.length).toBe(1)
+    expect(rows[0].query).toBe('test query')
+    expect(JSON.parse(rows[0].results)).toEqual([{ id, score: 0.8 }])
+  })
+
+  it('updates last_retrieved_at for returned facts', () => {
+    const id = store.addFact('test fact for timestamp', 'general')
+    store.logRetrieval('query', [{ id, score: 0.5 }])
+    const row = store.connection.prepare('SELECT last_retrieved_at FROM facts WHERE fact_id = ?').get(id) as any
+    expect(row.last_retrieved_at).not.toBeNull()
+  })
+
+  it('prunes log to max entries', () => {
+    for (let i = 0; i < 12; i++) {
+      store.logRetrieval(`query ${i}`, [])
+    }
+    store.pruneRetrievalLog(10)
+    const count = (store.connection.prepare('SELECT COUNT(*) as c FROM retrieval_log').get() as any).c
+    expect(count).toBe(10)
+  })
+})
+
+describe('runLearning', () => {
+  it('demotes high retrieval low helpful facts', () => {
+    const id = store.addFact('demote me', 'general')
+    store.connection.prepare('UPDATE facts SET retrieval_count = 100, helpful_count = 2, trust_score = 1.0 WHERE fact_id = ?').run(id)
+    const result = store.runLearning()
+    const row = store.connection.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(id) as any
+    expect(row.trust_score).toBeLessThan(1.0)
+    expect(result.demoted).toBeGreaterThanOrEqual(1)
+  })
+
+  it('promotes high helpful rate facts', () => {
+    const id = store.addFact('promote me', 'general')
+    store.connection.prepare('UPDATE facts SET retrieval_count = 50, helpful_count = 20, trust_score = 0.5 WHERE fact_id = ?').run(id)
+    store.runLearning()
+    const row = store.connection.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(id) as any
+    expect(row.trust_score).toBeGreaterThan(0.5)
+  })
+
+  it('does not adjust facts with low retrieval count', () => {
+    const id = store.addFact('new fact', 'general')
+    store.connection.prepare('UPDATE facts SET retrieval_count = 5, helpful_count = 0, trust_score = 0.8 WHERE fact_id = ?').run(id)
+    store.runLearning()
+    const row = store.connection.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(id) as any
+    expect(row.trust_score).toBe(0.8)
+  })
+
+  it('ages facts not retrieved for 60 days', () => {
+    const id = store.addFact('old fact', 'general')
+    store.connection.prepare("UPDATE facts SET last_retrieved_at = datetime('now', '-61 days'), trust_score = 0.8 WHERE fact_id = ?").run(id)
+    store.runLearning()
+    const row = store.connection.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(id) as any
+    expect(row.trust_score).toBeLessThan(0.8)
+  })
+
+  it('protects new facts with null last_retrieved_at from aging', () => {
+    const id = store.addFact('brand new fact', 'general')
+    store.connection.prepare('UPDATE facts SET trust_score = 0.5, last_retrieved_at = NULL WHERE fact_id = ?').run(id)
+    store.runLearning()
+    const row = store.connection.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(id) as any
+    expect(row.trust_score).toBe(0.5)
+  })
+
+  it('returns long_facts report', () => {
+    const id = store.addFact('x'.repeat(600), 'general')
+    const result = store.runLearning()
+    expect(result.long_facts.length).toBeGreaterThanOrEqual(1)
+    expect(result.long_facts.some((f: any) => f.id === id)).toBe(true)
+  })
+})
+
+describe('runAudit', () => {
+  it('returns quality report without modifying data', () => {
+    const id = store.addFact('a'.repeat(600), 'general')
+    store.connection.prepare('UPDATE facts SET retrieval_count = 100, helpful_count = 1 WHERE fact_id = ?').run(id)
+    const before = (store.connection.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(id) as any).trust_score
+    const report = store.runAudit()
+    const after = (store.connection.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(id) as any).trust_score
+    expect(before).toBe(after)
+    expect(report.total_facts).toBeGreaterThanOrEqual(1)
+    expect(report.long_without_summary.length).toBeGreaterThanOrEqual(1)
+  })
+})

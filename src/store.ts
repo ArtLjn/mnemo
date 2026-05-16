@@ -685,6 +685,160 @@ export class MemoryStore {
     return row.count
   }
 
+  /** 记录检索日志并更新 last_retrieved_at */
+  logRetrieval(query: string, results: Array<{ id: number; score: number }>): void {
+    const resultsJson = JSON.stringify(results)
+    this.db.prepare(
+      "INSERT INTO retrieval_log (query, results) VALUES (?, ?)"
+    ).run(query, resultsJson)
+
+    // 更新返回 fact 的 last_retrieved_at
+    if (results.length > 0) {
+      const ids = results.map(r => r.id)
+      const placeholders = ids.map(() => '?').join(',')
+      this.db.prepare(
+        `UPDATE facts SET last_retrieved_at = datetime('now', 'localtime') WHERE fact_id IN (${placeholders})`
+      ).run(...ids)
+    }
+
+    // 自动清理日志
+    this.pruneRetrievalLog(5000)
+  }
+
+  /** 清理检索日志，保留最近 maxEntries 条 */
+  pruneRetrievalLog(maxEntries = 5000): void {
+    this.db.prepare(
+      `DELETE FROM retrieval_log WHERE id NOT IN (
+        SELECT id FROM retrieval_log ORDER BY id DESC LIMIT ?
+      )`
+    ).run(maxEntries)
+  }
+
+  /** 自学习：基于检索统计自动调整 trust_score */
+  runLearning(): {
+    promoted: number
+    demoted: number
+    aged: number
+    unchanged: number
+    long_facts: Array<{ id: number; content_length: number; penalty: number; has_summary: boolean }>
+  } {
+    const rows = this.db.prepare(
+      'SELECT fact_id, content, summary, retrieval_count, helpful_count, trust_score, last_retrieved_at FROM facts'
+    ).all() as Array<{
+      fact_id: number; content: string; summary: string | null;
+      retrieval_count: number; helpful_count: number; trust_score: number; last_retrieved_at: string | null
+    }>
+
+    let promoted = 0
+    let demoted = 0
+    let aged = 0
+    let unchanged = 0
+    const longFacts: Array<{ id: number; content_length: number; penalty: number; has_summary: boolean }> = []
+
+    const now = Date.now()
+
+    for (const row of rows) {
+      let changed = false
+      const rate = row.retrieval_count > 0 ? row.helpful_count / row.retrieval_count : 0
+
+      // Rate-based adjustment (需要 30+ 次检索)
+      if (row.retrieval_count > 30) {
+        if (rate < 0.05) {
+          const newTrust = clampTrust(row.trust_score * 0.9)
+          this.db.prepare('UPDATE facts SET trust_score = ? WHERE fact_id = ?').run(newTrust, row.fact_id)
+          demoted++
+          changed = true
+        } else if (rate > 0.3) {
+          const newTrust = clampTrust(row.trust_score + 0.05)
+          this.db.prepare('UPDATE facts SET trust_score = ? WHERE fact_id = ?').run(newTrust, row.fact_id)
+          promoted++
+          changed = true
+        }
+      }
+
+      // Aging (60 天未检索)
+      if (row.last_retrieved_at) {
+        const lastRetrieved = new Date(row.last_retrieved_at + 'Z').getTime()
+        const daysSinceRetrieval = (now - lastRetrieved) / 86_400_000
+        if (daysSinceRetrieval > 60) {
+          const currentTrust = this.db.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(row.fact_id) as any
+          const newTrust = clampTrust(currentTrust.trust_score * 0.95)
+          this.db.prepare('UPDATE facts SET trust_score = ? WHERE fact_id = ?').run(newTrust, row.fact_id)
+          aged++
+          changed = true
+        }
+      }
+      // last_retrieved_at 为 NULL = 新 fact，不老化
+
+      if (!changed) unchanged++
+
+      // Long facts report (content > 300 字无 summary)
+      const matchLength = row.summary ? row.summary.length : row.content.length
+      if (matchLength > 300) {
+        longFacts.push({
+          id: row.fact_id,
+          content_length: row.content.length,
+          penalty: Math.min(1.0, 300 / matchLength),
+          has_summary: !!row.summary,
+        })
+      }
+    }
+
+    return { promoted, demoted, aged, unchanged, long_facts: longFacts }
+  }
+
+  /** 数据质量审计（只读，不修改数据） */
+  runAudit(): {
+    total_facts: number
+    long_without_summary: Array<{ id: number; content_length: number }>
+    low_helpful_rate: Array<{ id: number; rate: number; retrieval_count: number }>
+    aging_candidates: Array<{ id: number; last_retrieved_at: string | null }>
+  } {
+    const rows = this.db.prepare(
+      'SELECT fact_id, content, summary, retrieval_count, helpful_count, last_retrieved_at FROM facts'
+    ).all() as Array<{
+      fact_id: number; content: string; summary: string | null;
+      retrieval_count: number; helpful_count: number; last_retrieved_at: string | null
+    }>
+
+    const longWithoutSummary: Array<{ id: number; content_length: number }> = []
+    const lowHelpfulRate: Array<{ id: number; rate: number; retrieval_count: number }> = []
+    const agingCandidates: Array<{ id: number; last_retrieved_at: string | null }> = []
+
+    const now = Date.now()
+
+    for (const row of rows) {
+      // 超 500 字无 summary
+      if (row.content.length > 500 && !row.summary) {
+        longWithoutSummary.push({ id: row.fact_id, content_length: row.content.length })
+      }
+
+      // 低 helpful 率（>30 次检索，rate < 5%）
+      if (row.retrieval_count > 30) {
+        const rate = row.helpful_count / row.retrieval_count
+        if (rate < 0.05) {
+          lowHelpfulRate.push({ id: row.fact_id, rate: Math.round(rate * 1000) / 1000, retrieval_count: row.retrieval_count })
+        }
+      }
+
+      // 老化候选（>60 天未检索）
+      if (row.last_retrieved_at) {
+        const lastRetrieved = new Date(row.last_retrieved_at + 'Z').getTime()
+        const daysSince = (now - lastRetrieved) / 86_400_000
+        if (daysSince > 60) {
+          agingCandidates.push({ id: row.fact_id, last_retrieved_at: row.last_retrieved_at })
+        }
+      }
+    }
+
+    return {
+      total_facts: rows.length,
+      long_without_summary: longWithoutSummary,
+      low_helpful_rate: lowHelpfulRate,
+      aging_candidates: agingCandidates,
+    }
+  }
+
   /** 获取数据库连接（供 FactRetriever 直接使用） */
   get connection(): Database.Database {
     return this.db
