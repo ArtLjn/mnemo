@@ -27,8 +27,9 @@ const FACT_STORE_DESCRIPTION = `结构化事实记忆系统（SQLite+FTS5 索引
 写入时先 search 检查是否已存在相似事实。identity/coding_style/tool_pref/workflow/general → 全局库，project → 项目库。`
 
 const factStoreSchema = {
-  action: z.enum(['add', 'search', 'probe', 'related', 'reason', 'contradict', 'update', 'remove', 'list']),
+  action: z.enum(['add', 'search', 'probe', 'related', 'reason', 'contradict', 'update', 'remove', 'list', 'learn', 'audit']),
   content: z.union([z.string(), z.array(z.string())]).optional().describe("事实内容（'add' 必需，支持批量）"),
+  summary: z.string().optional().describe('超长事实的摘要（检索用 summary 匹配）'),
   query: z.string().optional().describe("搜索查询（'search' 必需）"),
   entity: z.string().optional().describe("实体名（'probe'/'related' 使用）"),
   entities: z.array(z.string()).optional().describe("实体列表（'reason' 使用）"),
@@ -62,6 +63,18 @@ const retriever = new FactRetriever(store, { temporalDecayHalfLife: 30 })
 store.decayTrustScores()
 store.auditContradictions()
 
+// Auto-learn on startup (non-blocking)
+process.nextTick(() => {
+  try {
+    const result = store.runLearning()
+    if (result.demoted > 0 || result.aged > 0 || result.long_facts.length > 0) {
+      console.error(`[mnemo:auto-learn] promoted=${result.promoted} demoted=${result.demoted} aged=${result.aged} long_facts=${result.long_facts.length}`)
+    }
+  } catch (err) {
+    console.error('[mnemo:auto-learn] error:', err)
+  }
+})
+
 // -- MCP Server --
 const server = new McpServer({ name: 'mnemo-mcp', version: '0.1.0' })
 
@@ -93,13 +106,22 @@ server.tool(
             let warnings: string[] | undefined
             const scan = fullSecurityScan(content)
             if (scan.warnings.length > 0 || scan.hasPii) warnings = [...scan.warnings]
+            if (content.length > 500 && !a.summary) {
+              warnings = [...(warnings ?? []), 'content 超过 500 字，建议提供 summary 或拆分为多条 fact']
+            }
 
             if (similar) {
               store.updateFact(similar.factId, { content, tags: a.tags, trustDelta: 0.05 })
+              if (a.summary) {
+                store.connection.prepare('UPDATE facts SET summary = ? WHERE fact_id = ?').run(a.summary, similar.factId)
+              }
               const demoted = store.demoteContradictingFacts(similar.factId, content, category)
               results.push({ fact_id: similar.factId, status: 'updated', reason: 'similar_fact_merged', ...(demoted > 0 ? { contradicted_demoted: demoted } : {}), ...(warnings ? { warnings } : {}) })
             } else {
               const factId = store.addFact(content, category, a.tags ?? '')
+              if (a.summary) {
+                store.connection.prepare('UPDATE facts SET summary = ? WHERE fact_id = ?').run(a.summary, factId)
+              }
               const demoted = store.demoteContradictingFacts(factId, content, category)
               results.push({ fact_id: factId, status: 'added', category, ...(demoted > 0 ? { contradicted_demoted: demoted } : {}), ...(warnings ? { warnings } : {}) })
             }
@@ -144,6 +166,9 @@ server.tool(
         case 'update': {
           if (!a.fact_id) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Missing required argument: fact_id' }) }] }
           const updated = store.updateFact(a.fact_id as number, { content: a.content as string | undefined, tags: a.tags, category, trustDelta: a.trust_delta })
+          if (a.summary !== undefined) {
+            store.connection.prepare('UPDATE facts SET summary = ? WHERE fact_id = ?').run(a.summary, a.fact_id as number)
+          }
           retriever.getCache().clear()
           resourceManager.invalidate()
           return { content: [{ type: 'text' as const, text: JSON.stringify({ updated }) }] }
@@ -157,6 +182,16 @@ server.tool(
           resourceManager.invalidate()
           const response = Array.isArray(a.fact_id) ? results : results[0]
           return { content: [{ type: 'text' as const, text: JSON.stringify(response) }] }
+        }
+
+        case 'learn': {
+          const result = store.runLearning()
+          return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] }
+        }
+
+        case 'audit': {
+          const report = store.runAudit()
+          return { content: [{ type: 'text' as const, text: JSON.stringify(report) }] }
         }
 
         case 'list': {
