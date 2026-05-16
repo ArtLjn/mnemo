@@ -106,8 +106,8 @@ export class FactRetriever {
         const inferred = this.categoryInferFallback(searchQuery, minTrust, limit)
         if (inferred.length > 0) return inferred
       }
-      // 个人/身份相关的短查询触发 trust fallback
-      if (this.isPersonalQuery(searchQuery)) {
+      // 个人/身份相关的短查询触发 trust fallback（用原始 query，避免 refineQuery 拆词导致正则失配）
+      if (this.isPersonalQuery(query)) {
         return this.trustFallback(category, minTrust, limit)
       }
       return []
