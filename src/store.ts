@@ -11,9 +11,8 @@
 
 import Database from 'better-sqlite3'
 import type { Statement } from 'better-sqlite3'
-import { mkdirSync, copyFileSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { homedir } from 'node:os'
 import { SCHEMA } from './schema.js'
 import type { Fact, FactCategory } from './types.js'
 
@@ -842,13 +841,14 @@ export class MemoryStore {
     }
   }
 
-  /** Dream 前备份数据库 */
-  backupDatabase(): string {
-    const backupDir = join(homedir(), '.mnemo', 'backup')
+  /** Dream 前备份数据库（使用 better-sqlite3 内置备份，安全处理 WAL 模式） */
+  async backupDatabase(): Promise<string> {
+    const dbDir = dirname(this.db.name)
+    const backupDir = join(dbDir, 'backup')
     mkdirSync(backupDir, { recursive: true })
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const backupPath = join(backupDir, `dream-${timestamp}.db`)
-    copyFileSync(this.db.name, backupPath)
+    await this.db.backup(backupPath)
     return backupPath
   }
 

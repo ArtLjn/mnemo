@@ -232,9 +232,9 @@ describe('runAudit', () => {
 })
 
 describe('dream - backup', () => {
-  it('creates backup before dream', () => {
+  it('creates backup before dream', async () => {
     store.addFact('test fact for backup', 'general')
-    const result = store.backupDatabase()
+    const result = await store.backupDatabase()
     expect(result).toBeTruthy()
     expect(result).toContain('dream-')
     expect(result).toContain('.db')
@@ -258,6 +258,7 @@ describe('dream - compress', () => {
     const id = store.addFact(longContent, 'general')
     store.connection.prepare('UPDATE facts SET summary = ? WHERE fact_id = ?').run('existing summary', id)
     const result = store.compressLongFacts()
+    expect(result).toBe(0)
     const row = store.connection.prepare('SELECT summary FROM facts WHERE fact_id = ?').get(id) as any
     expect(row.summary).toBe('existing summary')
   })
