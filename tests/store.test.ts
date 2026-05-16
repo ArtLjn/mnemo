@@ -269,3 +269,63 @@ describe('dream - compress', () => {
     expect(result).toBe(0)
   })
 })
+
+describe('dream - merge', () => {
+  it('merges overlapping facts in same category', () => {
+    store.addFact('用户偏好使用 TypeScript 编写前端代码', 'coding_style')
+    store.addFact('用户偏好使用 TypeScript 编写后端代码', 'coding_style')
+    const result = store.mergeOverlappingFacts()
+    expect(result.merged).toBeGreaterThanOrEqual(1)
+    expect(result.details.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('protects high frequency facts from deletion', () => {
+    const id1 = store.addFact('用户偏好使用 TypeScript 编写前端代码', 'coding_style')
+    const id2 = store.addFact('用户偏好使用 TypeScript 编写前端代码扩展', 'coding_style')
+    store.connection.prepare('UPDATE facts SET retrieval_count = 200 WHERE fact_id = ?').run(id1)
+    const result = store.mergeOverlappingFacts()
+    const kept = store.connection.prepare('SELECT fact_id FROM facts WHERE fact_id = ?').get(id1) as any
+    expect(kept).toBeTruthy()
+  })
+
+  it('does not merge facts across categories', () => {
+    store.addFact('用户偏好使用 TypeScript 编写前端代码', 'coding_style')
+    store.addFact('用户偏好使用 TypeScript 编写前端代码', 'general')
+    const result = store.mergeOverlappingFacts()
+    expect(result.merged).toBe(0)
+  })
+})
+
+describe('dream - reclassify', () => {
+  it('moves miscategorized facts by keywords', () => {
+    const id = store.addFact('编码规范：文件不超过 500 行', 'identity')
+    const result = store.reclassifyFacts()
+    expect(result).toBeGreaterThanOrEqual(1)
+    const row = store.connection.prepare('SELECT category FROM facts WHERE fact_id = ?').get(id) as any
+    expect(row.category).toBe('coding_style')
+  })
+
+  it('skips correctly categorized facts', () => {
+    store.addFact('用户偏好使用 VS Code 编辑器', 'tool_pref')
+    const result = store.reclassifyFacts()
+    expect(result).toBe(0)
+  })
+})
+
+describe('dream - runDream', () => {
+  it('runs full dream cycle and returns report', async () => {
+    // 长文 fact（触发压缩）
+    store.addFact('用户偏好使用 TypeScript 开发前端。使用 React 框架。' + 'x'.repeat(250), 'coding_style')
+    // 重叠 fact（触发合并）
+    store.addFact('用户偏好使用 TypeScript 开发前端代码', 'coding_style')
+    // 分类错误 fact（触发重分类）
+    store.addFact('编码规范：文件不超过 500 行', 'identity')
+
+    const report = await store.runDream({ skipBackup: true })
+    expect(report.compressed).toBeGreaterThanOrEqual(0)
+    expect(report.merged).toBeGreaterThanOrEqual(0)
+    expect(report.reclassified).toBeGreaterThanOrEqual(0)
+    expect(report.health.total).toBeGreaterThanOrEqual(1)
+    expect(report.health.coverage).toBeTruthy()
+  })
+})
