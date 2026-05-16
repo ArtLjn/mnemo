@@ -73,10 +73,90 @@ export class DreamEngine {
   }
 
   async smartCompress(): Promise<number> {
-    return 0
+    const rows = this.store.connection.prepare(
+      "SELECT fact_id, content FROM facts WHERE length(content) > 200 AND (summary IS NULL OR summary = '')"
+    ).all() as Array<{ fact_id: number; content: string }>
+
+    if (rows.length === 0) return 0
+
+    let compressed = 0
+
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE)
+      const factList = batch.map(f => `[${f.fact_id}] ${f.content}`).join('\n\n---\n\n')
+
+      const messages: LLMMessage[] = [
+        {
+          role: 'system',
+          content: `你是一个记忆摘要助手。为每条记忆生成简洁的摘要（≤150字）。
+摘要应保留核心信息：谁/什么/关键决策/关键数据。去除示例、过程描述、冗余细节。
+输出JSON：{"summaries": [{"fact_id": 数字, "summary": "摘要内容"}]}`,
+        },
+        { role: 'user', content: factList },
+      ]
+
+      try {
+        const result = await this.llm.chatJSON<{ summaries: Array<{ fact_id: number; summary: string }> }>(messages)
+        if (!result?.summaries || !Array.isArray(result.summaries)) continue
+
+        for (const item of result.summaries) {
+          if (!item.fact_id || !item.summary) continue
+          const truncated = item.summary.length > 150 ? item.summary.slice(0, 147) + '...' : item.summary
+          this.store.connection.prepare('UPDATE facts SET summary = ? WHERE fact_id = ?').run(truncated, item.fact_id)
+          compressed++
+        }
+      } catch {
+        continue
+      }
+    }
+
+    return compressed
   }
 
   async smartReclassify(): Promise<number> {
-    return 0
+    const rows = this.store.connection.prepare(
+      "SELECT fact_id, content FROM facts WHERE category = 'general'"
+    ).all() as Array<{ fact_id: number; content: string }>
+
+    if (rows.length === 0) return 0
+
+    const validCategories = ['identity', 'coding_style', 'tool_pref', 'workflow']
+    let reclassified = 0
+
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE)
+      const factList = batch.map(f => `[${f.fact_id}] ${f.content}`).join('\n')
+
+      const messages: LLMMessage[] = [
+        {
+          role: 'system',
+          content: `你是一个记忆分类助手。分析以下记忆条目，判断它们应该属于哪个分类。
+可选分类：identity（身份/角色）、coding_style（编码规范）、tool_pref（工具偏好）、workflow（工作流）
+如果记忆不属于以上任何分类，保持 general。
+输出JSON：{"reclassify": [{"fact_id": 数字, "to": "分类名"}]}
+不需要重新分类的条目不要输出。`,
+        },
+        { role: 'user', content: factList },
+      ]
+
+      try {
+        const result = await this.llm.chatJSON<{ reclassify: Array<{ fact_id: number; to: string }> }>(messages)
+        if (!result?.reclassify || !Array.isArray(result.reclassify)) continue
+
+        for (const item of result.reclassify) {
+          if (!item.fact_id || !item.to) continue
+          if (!validCategories.includes(item.to)) continue
+
+          this.store.connection.prepare(
+            "UPDATE facts SET category = ?, updated_at = datetime('now', 'localtime') WHERE fact_id = ?"
+          ).run(item.to, item.fact_id)
+          reclassified++
+        }
+      } catch {
+        continue
+      }
+    }
+
+    return reclassified
   }
 }
