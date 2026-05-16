@@ -6,7 +6,8 @@
   "main": "dist/server.js",
   "bin": {
     "mnemo": "dist/server.js",
-    "mnemo-init": "dist/init.js"
+    "mnemo-init": "dist/init.js",
+    "mnemo-dream": "dist/dream.js"
   },
   "publishConfig": {
     "access": "public"
