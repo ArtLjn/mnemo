@@ -55,7 +55,7 @@ export interface RetrieverOptions {
 
 /** fact_store 工具调用参数 */
 export interface FactStoreArgs {
-  action: 'add' | 'search' | 'probe' | 'related' | 'reason' | 'contradict' | 'update' | 'remove' | 'list' | 'learn' | 'audit'
+  action: 'add' | 'search' | 'probe' | 'related' | 'reason' | 'contradict' | 'update' | 'remove' | 'list' | 'learn' | 'audit' | 'dream'
   content?: string | string[]
   query?: string
   entity?: string
@@ -81,4 +81,28 @@ export interface SecurityScanResult {
   warnings: string[]
   hasPii: boolean
   injectionAttempts: string[]
+}
+
+/** Dream 整理报告 */
+export interface DreamReport {
+  merged: number
+  compressed: number
+  reclassified: number
+  deleted: number
+  mergeDetails: Array<{ kept: number; removed: number; similarity: number }>
+  health: {
+    total: number
+    avg_trust: number
+    avg_length: number
+    coverage: Record<FactCategory, number>
+  }
+}
+
+/** 精简搜索结果 */
+export interface CompactFactResult {
+  factId: number
+  display: string
+  category: FactCategory
+  trustScore: number
+  score: number
 }
