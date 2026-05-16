@@ -854,77 +854,83 @@ export class MemoryStore {
 
   /** 合并同 category 内 Jaccard > 0.6 的重叠 fact */
   mergeOverlappingFacts(): { merged: number; details: Array<{ kept: number; removed: number; similarity: number }> } {
-    const categories: FactCategory[] = ['identity', 'coding_style', 'tool_pref', 'workflow', 'general']
-    let merged = 0
-    const details: Array<{ kept: number; removed: number; similarity: number }> = []
+    return this.db.transaction(() => {
+      const categories: FactCategory[] = ['identity', 'coding_style', 'tool_pref', 'workflow', 'general']
+      let merged = 0
+      const details: Array<{ kept: number; removed: number; similarity: number }> = []
 
-    for (const cat of categories) {
-      const rows = this.db.prepare(
-        'SELECT fact_id, content, retrieval_count FROM facts WHERE category = ? ORDER BY trust_score DESC'
-      ).all(cat) as Array<{ fact_id: number; content: string; retrieval_count: number }>
+      for (const cat of categories) {
+        const rows = this.db.prepare(
+          'SELECT fact_id, content, retrieval_count FROM facts WHERE category = ? ORDER BY trust_score DESC'
+        ).all(cat) as Array<{ fact_id: number; content: string; retrieval_count: number }>
 
-      const removed = new Set<number>()
+        const removed = new Set<number>()
 
-      for (let i = 0; i < rows.length; i++) {
-        if (removed.has(rows[i].fact_id)) continue
-        const tokensA = this.tokenizeForDedup(rows[i].content)
+        for (let i = 0; i < rows.length; i++) {
+          if (removed.has(rows[i].fact_id)) continue
+          const tokensA = this.tokenizeForDedup(rows[i].content)
 
-        for (let j = i + 1; j < rows.length; j++) {
-          if (removed.has(rows[j].fact_id)) continue
-          const tokensB = this.tokenizeForDedup(rows[j].content)
-          const sim = this.jaccardSimilarity(tokensA, tokensB)
+          for (let j = i + 1; j < rows.length; j++) {
+            if (removed.has(rows[j].fact_id)) continue
+            const tokensB = this.tokenizeForDedup(rows[j].content)
+            const sim = this.jaccardSimilarity(tokensA, tokensB)
 
-          if (sim > 0.6) {
-            const aHighFreq = rows[i].retrieval_count > 100
-            const bHighFreq = rows[j].retrieval_count > 100
+            if (sim > 0.6) {
+              const aHighFreq = rows[i].retrieval_count > 100
+              const bHighFreq = rows[j].retrieval_count > 100
 
-            if (aHighFreq && bHighFreq) continue
+              if (aHighFreq && bHighFreq) continue
 
-            let keptId: number, removedId: number
-            if (bHighFreq) {
-              keptId = rows[j].fact_id
-              removedId = rows[i].fact_id
-            } else {
-              keptId = rows[i].fact_id
-              removedId = rows[j].fact_id
+              let keptId: number, removedId: number
+              if (bHighFreq) {
+                keptId = rows[j].fact_id
+                removedId = rows[i].fact_id
+              } else {
+                keptId = rows[i].fact_id
+                removedId = rows[j].fact_id
+              }
+
+              this.removeFact(removedId)
+              removed.add(removedId)
+              details.push({ kept: keptId, removed: removedId, similarity: Math.round(sim * 100) / 100 })
+              merged++
+              // 外层 fact 被删除时停止内层循环，避免幽灵操作
+              if (removedId === rows[i].fact_id) break
             }
-
-            this.removeFact(removedId)
-            removed.add(removedId)
-            details.push({ kept: keptId, removed: removedId, similarity: Math.round(sim * 100) / 100 })
-            merged++
           }
         }
       }
-    }
-    return { merged, details }
+      return { merged, details }
+    })()
   }
 
   /** 分类修正：按关键词规则表将误分类的 fact 挪到正确 category */
   reclassifyFacts(): number {
-    const rules: Array<{ keywords: string[]; target: FactCategory }> = [
-      { keywords: ['角色设定', '暖暖', '身份', '编程女朋友', '暖宝宝'], target: 'identity' },
-      { keywords: ['编码规范', '代码风格', 'pytest', '文件不超过', '方法不超过'], target: 'coding_style' },
-      { keywords: ['工作流', 'OpenSpec', 'writing-plans', 'subagent'], target: 'workflow' },
-      { keywords: ['偏好', 'VS Code', '编辑器', 'IDE', '快捷键'], target: 'tool_pref' },
-    ]
+    return this.db.transaction(() => {
+      const rules: Array<{ keywords: string[]; target: FactCategory }> = [
+        { keywords: ['角色设定', '暖暖', '身份', '编程女朋友', '暖宝宝'], target: 'identity' },
+        { keywords: ['编码规范', '代码风格', 'pytest', '文件不超过', '方法不超过'], target: 'coding_style' },
+        { keywords: ['工作流', 'OpenSpec', 'writing-plans', 'subagent'], target: 'workflow' },
+        { keywords: ['偏好', 'VS Code', '编辑器', 'IDE', '快捷键'], target: 'tool_pref' },
+      ]
 
-    const rows = this.db.prepare(
-      'SELECT fact_id, content, category FROM facts'
-    ).all() as Array<{ fact_id: number; content: string; category: string }>
+      const rows = this.db.prepare(
+        'SELECT fact_id, content, category FROM facts'
+      ).all() as Array<{ fact_id: number; content: string; category: string }>
 
-    let reclassified = 0
-    for (const row of rows) {
-      for (const rule of rules) {
-        if (rule.target === row.category) continue
-        if (rule.keywords.some(kw => row.content.includes(kw))) {
-          this.db.prepare('UPDATE facts SET category = ? WHERE fact_id = ?').run(rule.target, row.fact_id)
-          reclassified++
-          break
+      let reclassified = 0
+      for (const row of rows) {
+        for (const rule of rules) {
+          if (rule.target === row.category) continue
+          if (rule.keywords.some(kw => row.content.includes(kw))) {
+            this.db.prepare("UPDATE facts SET category = ?, updated_at = datetime('now', 'localtime') WHERE fact_id = ?").run(rule.target, row.fact_id)
+            reclassified++
+            break
+          }
         }
       }
-    }
-    return reclassified
+      return reclassified
+    })()
   }
 
   /** 执行完整 dream cycle：备份 → 压缩 → 合并 → 重分类 → 报告 */

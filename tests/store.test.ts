@@ -294,6 +294,18 @@ describe('dream - merge', () => {
     const result = store.mergeOverlappingFacts()
     expect(result.merged).toBe(0)
   })
+
+  it('does not merge when both facts are high frequency', () => {
+    const id1 = store.addFact('高频测试事实 AAA 长内容匹配', 'coding_style')
+    const id2 = store.addFact('高频测试事实 BBB 长内容匹配', 'coding_style')
+    store.connection.prepare('UPDATE facts SET retrieval_count = 200 WHERE fact_id IN (?, ?)').run(id1, id2)
+    const result = store.mergeOverlappingFacts()
+    // Both facts should still exist
+    const row1 = store.connection.prepare('SELECT fact_id FROM facts WHERE fact_id = ?').get(id1) as any
+    const row2 = store.connection.prepare('SELECT fact_id FROM facts WHERE fact_id = ?').get(id2) as any
+    expect(row1).toBeTruthy()
+    expect(row2).toBeTruthy()
+  })
 })
 
 describe('dream - reclassify', () => {
