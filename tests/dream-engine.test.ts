@@ -77,7 +77,7 @@ describe('DreamEngine - semanticMerge', () => {
 
 describe('DreamEngine - smartCompress', () => {
   it('generates summary for long facts without summary', async () => {
-    const longContent = '这是一段很长的记忆内容。'.repeat(15) // >200 chars
+    const longContent = '这是一段很长的记忆内容。'.repeat(20) // >200 chars
     store.addFact(longContent, 'general')
 
     const summary = '这是一段关于长内容的简洁摘要'
@@ -90,7 +90,7 @@ describe('DreamEngine - smartCompress', () => {
   })
 
   it('skips facts that already have summary', async () => {
-    const longContent = '这是一段很长的记忆内容。'.repeat(15)
+    const longContent = '这是一段很长的记忆内容。'.repeat(20)
     const id = store.addFact(longContent, 'general')
     store.connection.prepare('UPDATE facts SET summary = ? WHERE fact_id = ?').run('已有摘要', id)
 
@@ -104,7 +104,7 @@ describe('DreamEngine - smartCompress', () => {
   })
 
   it('truncates summary longer than 150 chars', async () => {
-    const longContent = '这是一段很长的记忆内容。'.repeat(15)
+    const longContent = '这是一段很长的记忆内容。'.repeat(20)
     store.addFact(longContent, 'general')
 
     const tooLongSummary = 'a'.repeat(200)
