@@ -339,5 +339,6 @@ describe('dream - runDream', () => {
     expect(report.reclassified).toBeGreaterThanOrEqual(0)
     expect(report.health.total).toBeGreaterThanOrEqual(1)
     expect(report.health.coverage).toBeTruthy()
+    expect(report.fallback).toBe(true) // 测试环境无 Ollama，应降级到规则引擎
   })
 })

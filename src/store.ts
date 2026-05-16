@@ -15,6 +15,9 @@ import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { SCHEMA } from './schema.js'
 import type { Fact, FactCategory, DreamReport } from './types.js'
+import { loadConfig } from './config.js'
+import { LLMClient } from './llm-client.js'
+import { DreamEngine } from './dream-engine.js'
 
 // 信任评分常量
 const HELPFUL_DELTA = 0.05
@@ -933,16 +936,43 @@ export class MemoryStore {
     })()
   }
 
-  /** 执行完整 dream cycle：备份 → 压缩 → 合并 → 重分类 → 报告 */
+  /** 执行完整 dream cycle：备份 → LLM 整理 → 降级规则引擎 → 报告 */
   async runDream(options?: { skipBackup?: boolean }): Promise<DreamReport> {
     if (!options?.skipBackup) {
       await this.backupDatabase()
     }
 
+    // 尝试 LLM 驱动的 dream
+    const config = loadConfig()
+    const llmClient = new LLMClient(config)
+
+    const available = await llmClient.isAvailable()
+    if (available) {
+      try {
+        const engine = new DreamEngine(llmClient, this)
+        const mergeResult = await engine.semanticMerge()
+        const compressed = await engine.smartCompress()
+        const reclassified = await engine.smartReclassify()
+
+        return this.buildDreamReport(mergeResult.merged, compressed, reclassified, mergeResult.details.map(d => ({ kept: d.kept, removed: d.removed, similarity: 0 })), false)
+      } catch {
+        // LLM 执行失败，降级到规则引擎
+      }
+    }
+
+    // 降级到规则引擎
     const compressed = this.compressLongFacts()
     const mergeResult = this.mergeOverlappingFacts()
     const reclassified = this.reclassifyFacts()
 
+    return this.buildDreamReport(mergeResult.merged, compressed, reclassified, mergeResult.details, true, 'LLM unavailable')
+  }
+
+  private buildDreamReport(
+    merged: number, compressed: number, reclassified: number,
+    mergeDetails: Array<{ kept: number; removed: number; similarity: number }>,
+    fallback: boolean, fallbackReason?: string,
+  ): DreamReport {
     const stats = this.db.prepare(`
       SELECT COUNT(*) as total,
              AVG(trust_score) as avg_trust,
@@ -958,11 +988,13 @@ export class MemoryStore {
     }
 
     return {
-      merged: mergeResult.merged,
+      merged,
       compressed,
       reclassified,
-      deleted: mergeResult.merged,
-      mergeDetails: mergeResult.details,
+      deleted: merged,
+      mergeDetails,
+      fallback,
+      fallbackReason,
       health: {
         total: stats.total,
         avg_trust: Math.round((stats.avg_trust ?? 0) * 100) / 100,
