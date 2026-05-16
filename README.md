@@ -15,6 +15,8 @@ AI coding assistants forget everything between sessions. `CLAUDE.md` stores stat
 mnemo gives your AI assistant a **searchable, structured memory layer** that persists across sessions:
 
 - **Search by meaning** — FTS5 full-text search + Jaccard reranking + bilingual expansion
+- **Session warmup** — MCP Resources auto-inject top facts at session start, zero tool calls
+- **Query refinement** — strips action words and noise tokens before memory search
 - **Trust scoring** — facts gain or lose trust over time based on feedback and decay
 - **Entity graph** — automatic entity extraction with multi-hop relationship queries
 - **Contradiction detection** — finds conflicting facts and demotes the older one
@@ -49,15 +51,26 @@ claude mcp add mnemo -- mnemo
 
 You have mnemo memory tools (fact_store / fact_feedback). Rules:
 
-## Rule 1: Search before answering
-After receiving a user message, call `fact_store(action="search", query="<keywords from user message>")`.
-Extract keywords from the user's actual message — do NOT use a fixed template.
+## Rule 1: Session warmup (automatic)
+mnemo MCP Resources auto-inject global memory into system context at session start.
+You do NOT need to call fact_store(search) for high-frequency memories.
 
-## Rule 2: Write on request
+## Rule 2: On-demand search
+Only call fact_store(action="search") when:
+- User message involves personal preferences/habits/tool choices not covered by warmup
+- User explicitly queries memory ("what did I say before", "per my habits")
+- Technical decisions need user preference confirmation
+
+Do NOT trigger search for:
+- Pure operations ("run tests", "git commit")
+- General tech questions ("how to use Promise")
+- Code review/explanation requests
+
+## Rule 3: Write on request
 When user says "remember", call `fact_store(action="add", content="...", category="...")`.
 Search first to avoid duplicates. Categories: identity / coding_style / tool_pref / workflow / general.
 
-## Rule 3: Feedback
+## Rule 4: Feedback
 When a memory was useful, call `fact_feedback(action="helpful", fact_id=...)`.
 ```
 
@@ -115,21 +128,37 @@ Rate a fact after use. Good facts rise, bad facts decay.
 | `helpful` | +0.05 trust |
 | `unhelpful` | -0.10 trust |
 
+## MCP Resources
+
+mnemo exposes 5 global category resources for **zero-cost session warmup**:
+
+| Resource URI | Description |
+|-------------|-------------|
+| `mnemo://global/identity` | Identity facts (top 10 by trust) |
+| `mnemo://global/coding_style` | Coding style preferences |
+| `mnemo://global/tool_pref` | Tool preferences |
+| `mnemo://global/workflow` | Workflow preferences |
+| `mnemo://global/general` | General facts |
+
+MCP clients (Claude Code, Codex) automatically fetch these resources at session start, injecting memory into system context without any tool calls. This eliminates the need for "search every message" patterns.
+
 ## Architecture
 
 ```
 ┌───────────────────┐   stdio    ┌────────────┐   SQLite    ┌─────────────────────┐
 │   MCP Client      │◄─────────►│  mnemo     │◄───────────►│ ~/.mnemo/facts.db   │
 │ (Claude / Codex)  │   JSON    │  server    │             │                     │
-└───────────────────┘           └─────┬──────┘             │ Tables:             │
-                                      │                    │   facts             │
-                               ┌──────┴──────┐             │   entities          │
-                               │             │             │   fact_entities     │
-                               │  Retriever  │  Security   │ Indexes:            │
-                               │  (search,   │  (PII scan, │   facts_fts (FTS5)  │
-                               │   probe,    │   injection │   idx_facts_trust   │
-                               │   reason)   │   detection)│   idx_facts_category│
-                               └─────────────┘             └─────────────────────┘
+│                   │           └─────┬──────┘             │ Tables:             │
+│  Auto-fetch:      │                 │                    │   facts             │
+│  mnemo://global/* │      ┌──────────┼──────────┐         │   entities          │
+│  (session warmup) │      │          │          │         │   fact_entities     │
+└───────────────────┘      │          │          │         │ Indexes:            │
+                           │          │          │         │   facts_fts (FTS5)  │
+                     Resources   Retriever   Security       │   idx_facts_trust   │
+                     (warmup,   (search,    (PII scan,     │   idx_facts_category│
+                      cache)     probe,     injection      └─────────────────────┘
+                                 reason)    detection)
+                                └──────────────────┘
 ```
 
 ## Categories
