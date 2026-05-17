@@ -326,6 +326,7 @@ describe('dream - reclassify', () => {
 
 describe('dream - runDream', () => {
   it('runs full dream cycle and returns report', async () => {
+    // LLM API 调用需要更长时间
     // 长文 fact（触发压缩）
     store.addFact('用户偏好使用 TypeScript 开发前端。使用 React 框架。' + 'x'.repeat(250), 'coding_style')
     // 重叠 fact（触发合并）
@@ -340,5 +341,5 @@ describe('dream - runDream', () => {
     expect(report.health.total).toBeGreaterThanOrEqual(1)
     expect(report.health.coverage).toBeTruthy()
     expect(typeof report.fallback).toBe('boolean')
-  })
+  }, 30000)
 })
