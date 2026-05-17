@@ -954,9 +954,8 @@ export class MemoryStore {
         const engine = new DreamEngine(llmClient, this)
         const compressed = await engine.smartCompress()
         const mergeResult = await engine.semanticMerge()
-        const reclassified = await engine.smartReclassify()
 
-        return this.buildDreamReport(mergeResult.merged, compressed, reclassified, mergeResult.details.map(d => ({ kept: d.kept, removed: d.removed, similarity: 0 })), false)
+        return this.buildDreamReport(mergeResult.merged, compressed, 0, mergeResult.details.map(d => ({ kept: d.kept, removed: d.removed, similarity: 0 })), false)
       } catch (e) {
         console.log(`[dream] LLM 执行失败，降级: ${(e as Error).message}`)
       }
