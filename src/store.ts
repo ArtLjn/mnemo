@@ -952,8 +952,8 @@ export class MemoryStore {
       console.log('[dream] LLM 服务可用，使用 LLM 驱动整理')
       try {
         const engine = new DreamEngine(llmClient, this)
-        const compressed = await engine.smartCompress()
         const mergeResult = await engine.semanticMerge()
+        const compressed = await engine.smartCompress()
 
         return this.buildDreamReport(mergeResult.merged, compressed, 0, mergeResult.details.map(d => ({ kept: d.kept, removed: d.removed, similarity: 0 })), false)
       } catch (e) {
@@ -1026,7 +1026,8 @@ export class MemoryStore {
 
   /** 从 content 提取前 2 个完整句子（总长 ≤ 150 字） */
   private extractSummary(content: string): string | null {
-    const sentences = content.split(/[。\n.]/).map(s => s.trim()).filter(s => s.length > 0)
+    // 不以 . 分割，避免 URL/邮箱中的点被当作句子分隔符
+    const sentences = content.split(/[。\n！？!?]/).map(s => s.trim()).filter(s => s.length > 0)
     if (sentences.length === 0) return null
     let summary = sentences[0]
     if (sentences.length > 1 && summary.length + sentences[1].length <= 148) {
