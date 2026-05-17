@@ -35,15 +35,28 @@ export class LLMClient {
 
   async chatJSON<T = unknown>(messages: LLMMessage[]): Promise<T> {
     const text = await this.chat(messages)
+    // 1. 直接解析
     try {
       return JSON.parse(text)
-    } catch {
-      const match = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/)
-      if (match) {
-        return JSON.parse(match[1].trim())
-      }
-      throw new Error(`LLM response is not valid JSON: ${text.slice(0, 200)}`)
+    } catch {}
+    // 2. 提取 markdown code fence
+    const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/)
+    if (fenceMatch) {
+      try { return JSON.parse(fenceMatch[1].trim()) } catch {}
     }
+    // 3. 找到第一个 { 和最后一个 } 之间的内容
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    if (start !== -1 && end > start) {
+      try { return JSON.parse(text.slice(start, end + 1)) } catch {}
+    }
+    // 4. 找到第一个 [ 和最后一个 ] 之间的内容
+    const arrStart = text.indexOf('[')
+    const arrEnd = text.lastIndexOf(']')
+    if (arrStart !== -1 && arrEnd > arrStart) {
+      try { return JSON.parse(text.slice(arrStart, arrEnd + 1)) } catch {}
+    }
+    throw new Error(`LLM response is not valid JSON: ${text.slice(0, 200)}`)
   }
 
   async isAvailable(): Promise<boolean> {

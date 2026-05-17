@@ -87,6 +87,17 @@ describe('LLMClient', () => {
       const client = new LLMClient(mockConfig)
       await expect(client.chatJSON([{ role: 'user', content: 'test' }])).rejects.toThrow()
     })
+
+    it('extracts JSON from text with leading/trailing content', async () => {
+      const jsonBody = { merges: [{ kept: 1, removed: 2 }] }
+      const mixedText = '根据分析结果如下：\n' + JSON.stringify(jsonBody) + '\n以上就是分析。'
+      globalThis.fetch = mockFetchResponse({
+        choices: [{ message: { content: mixedText } }],
+      })
+      const client = new LLMClient(mockConfig)
+      const result = await client.chatJSON<{ merges: unknown[] }>([{ role: 'user', content: 'test' }])
+      expect(result.merges).toHaveLength(1)
+    })
   })
 
   describe('isAvailable', () => {
