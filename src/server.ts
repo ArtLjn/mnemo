@@ -8,7 +8,7 @@ import { z } from 'zod/v4'
 import { MemoryStore } from './store.js'
 import { FactRetriever } from './retriever.js'
 import { ResourceManager } from './resources.js'
-import { fullSecurityScan } from './security.js'
+import { fullSecurityScan, scanContentQuality } from './security.js'
 import type { FactStoreArgs, FactFeedbackArgs, FactCategory, ScoredFact, CompactFactResult } from './types.js'
 
 const FACT_STORE_DESCRIPTION = `结构化事实记忆系统（SQLite+FTS5 索引）。支持读写。
@@ -130,13 +130,15 @@ server.tool(
               results.push({ fact_id: -1, status: 'error', reason: 'empty content' })
               continue
             }
+            const quality = scanContentQuality(content.trim())
+            if (!quality.passed) {
+              results.push({ fact_id: -1, status: 'error', reason: quality.issues.join('; ') })
+              continue
+            }
             const similar = store.findSimilarFact(content, category) ?? store.findSimilarFact(content)
             let warnings: string[] | undefined
             const scan = fullSecurityScan(content)
             if (scan.warnings.length > 0 || scan.hasPii) warnings = [...scan.warnings]
-            if (content.length > 500 && !a.summary) {
-              warnings = [...(warnings ?? []), 'content 超过 500 字，建议提供 summary 或拆分为多条 fact']
-            }
 
             if (similar) {
               store.updateFact(similar.factId, { content, tags: a.tags, trustDelta: 0.05 })
