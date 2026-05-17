@@ -2,7 +2,7 @@ import type { FactCategory, LLMMessage } from './types.js'
 import type { LLMClient } from './llm-client.js'
 import type { MemoryStore } from './store.js'
 
-const BATCH_SIZE = 20
+const BATCH_SIZE = 10
 const MAX_DELETE_RATIO = 0.1
 const TRUST_DELETE_LIMIT = 0.8
 const RETRIEVAL_DELETE_LIMIT = 100

@@ -18,6 +18,7 @@ export class LLMClient {
         model: this.config.model,
         messages,
         temperature: options?.temperature ?? this.config.temperature,
+        max_tokens: 8192,
         stream: false,
         enable_thinking: false,
       }),
