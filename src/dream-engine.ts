@@ -7,10 +7,12 @@ const MAX_DELETE_RATIO = 0.1
 const TRUST_DELETE_LIMIT = 0.8
 const RETRIEVAL_DELETE_LIMIT = 100
 const MAX_CONTENT_CHARS = 500
+const MAX_COMPRESS_CHARS = 2000
 
 function truncateContent(content: string, summary: string | null): string {
-  const text = summary || content
-  return text.length > MAX_CONTENT_CHARS ? text.slice(0, MAX_CONTENT_CHARS) + '...' : text
+  if (summary) return summary
+  if (content.length <= MAX_CONTENT_CHARS) return content
+  return content.slice(0, MAX_CONTENT_CHARS) + `...[共${content.length}字，已截断]`
 }
 
 export class DreamEngine {
@@ -105,7 +107,12 @@ export class DreamEngine {
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE)
       this.log(`摘要第 ${i + 1}-${Math.min(i + BATCH_SIZE, rows.length)} 条...`)
-      const factList = batch.map(f => `[${f.fact_id}] ${truncateContent(f.content, f.summary)}`).join('\n\n---\n\n')
+      const factList = batch.map(f => {
+        const c = f.content.length > MAX_COMPRESS_CHARS
+          ? f.content.slice(0, MAX_COMPRESS_CHARS) + `...[共${f.content.length}字]`
+          : f.content
+        return `[${f.fact_id}] ${c}`
+      }).join('\n\n---\n\n')
 
       const messages: LLMMessage[] = [
         {

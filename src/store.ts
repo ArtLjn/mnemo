@@ -945,19 +945,23 @@ export class MemoryStore {
     // 尝试 LLM 驱动的 dream
     const config = loadConfig()
     const llmClient = new LLMClient(config)
+    console.log(`[dream] LLM 配置: ${config.baseUrl} / ${config.model}`)
 
     const available = await llmClient.isAvailable()
     if (available) {
+      console.log('[dream] LLM 服务可用，使用 LLM 驱动整理')
       try {
         const engine = new DreamEngine(llmClient, this)
-        const mergeResult = await engine.semanticMerge()
         const compressed = await engine.smartCompress()
+        const mergeResult = await engine.semanticMerge()
         const reclassified = await engine.smartReclassify()
 
         return this.buildDreamReport(mergeResult.merged, compressed, reclassified, mergeResult.details.map(d => ({ kept: d.kept, removed: d.removed, similarity: 0 })), false)
-      } catch {
-        // LLM 执行失败，降级到规则引擎
+      } catch (e) {
+        console.log(`[dream] LLM 执行失败，降级: ${(e as Error).message}`)
       }
+    } else {
+      console.log('[dream] LLM 不可用，使用规则引擎')
     }
 
     // 降级到规则引擎
