@@ -13,11 +13,13 @@ export class LLMClient {
     const resp = await fetch(url, {
       method: 'POST',
       headers,
+      signal: AbortSignal.timeout(60000),
       body: JSON.stringify({
         model: this.config.model,
         messages,
         temperature: options?.temperature ?? this.config.temperature,
         stream: false,
+        enable_thinking: false,
       }),
     })
 
@@ -47,9 +49,14 @@ export class LLMClient {
   async isAvailable(): Promise<boolean> {
     try {
       const url = `${this.config.baseUrl}/models`
+      const headers: Record<string, string> = {}
+      if (this.config.apiKey) {
+        headers['Authorization'] = `Bearer ${this.config.apiKey}`
+      }
       const resp = await fetch(url, {
         method: 'GET',
-        signal: AbortSignal.timeout(3000),
+        headers,
+        signal: AbortSignal.timeout(10000),
       })
       return resp.ok
     } catch {

@@ -10,6 +10,10 @@ const RETRIEVAL_DELETE_LIMIT = 100
 export class DreamEngine {
   constructor(private llm: LLMClient, private store: MemoryStore) {}
 
+  private log(msg: string) {
+    console.log(`[dream] ${msg}`)
+  }
+
   async semanticMerge(): Promise<{
     merged: number
     details: Array<{ kept: number; removed: number; reason: string }>
@@ -20,6 +24,7 @@ export class DreamEngine {
 
     const totalFacts = this.store.getTotalCount()
     const maxDeletes = Math.max(1, Math.floor(totalFacts * MAX_DELETE_RATIO))
+    this.log(`语义合并开始，共 ${totalFacts} 条 fact，最多删除 ${maxDeletes} 条`)
 
     for (const cat of categories) {
       const facts = this.store.listFacts(cat, 0, 200)
@@ -27,6 +32,7 @@ export class DreamEngine {
 
       for (let i = 0; i < facts.length; i += BATCH_SIZE) {
         const batch = facts.slice(i, i + BATCH_SIZE)
+        this.log(`[${cat}] 分析第 ${i + 1}-${Math.min(i + BATCH_SIZE, facts.length)} 条 (共 ${facts.length} 条)...`)
         const factList = batch.map(f => `[${f.factId}] ${f.content}`).join('\n')
 
         const messages: LLMMessage[] = [
@@ -44,31 +50,36 @@ export class DreamEngine {
         ]
 
         try {
-          const result = await this.llm.chatJSON<{ merges: Array<{ kept: number; removed: number; reason: string }> }>(messages)
+          const result = await this.llm.chatJSON<{ merges: Array<{ kept: number | string; removed: number | string; reason: string }> }>(messages)
           if (!result?.merges || !Array.isArray(result.merges)) continue
 
           for (const merge of result.merges) {
             if (merged >= maxDeletes) break
-            if (!merge.kept || !merge.removed) continue
+            const keptId = Number(merge.kept)
+            const removedId = Number(merge.removed)
+            if (!keptId || !removedId) continue
 
-            const toRemove = this.store.listFacts(cat, 0, 200).find(f => f.factId === merge.removed)
+            const toRemove = this.store.listFacts(cat, 0, 200).find(f => f.factId === removedId)
             if (!toRemove) continue
             if (toRemove.trustScore > TRUST_DELETE_LIMIT) continue
             if (toRemove.retrievalCount > RETRIEVAL_DELETE_LIMIT) continue
 
-            const toKeep = this.store.listFacts(cat, 0, 200).find(f => f.factId === merge.kept)
+            const toKeep = this.store.listFacts(cat, 0, 200).find(f => f.factId === keptId)
             if (!toKeep) continue
 
-            this.store.removeFact(merge.removed)
-            details.push({ kept: merge.kept, removed: merge.removed, reason: merge.reason })
+            this.store.removeFact(removedId)
+            details.push({ kept: keptId, removed: removedId, reason: merge.reason })
+            this.log(`合并: #${merge.removed} → #${merge.kept} (${merge.reason})`)
             merged++
           }
-        } catch {
+        } catch (e) {
+          this.log(`[${cat}] 批次分析失败: ${(e as Error).message?.slice(0, 80)}`)
           continue
         }
       }
     }
 
+    this.log(`语义合并完成: ${merged} 条合并`)
     return { merged, details }
   }
 
@@ -77,12 +88,17 @@ export class DreamEngine {
       "SELECT fact_id, content FROM facts WHERE length(content) > 200 AND (summary IS NULL OR summary = '')"
     ).all() as Array<{ fact_id: number; content: string }>
 
-    if (rows.length === 0) return 0
+    if (rows.length === 0) {
+      this.log('智能摘要: 无需摘要的 fact')
+      return 0
+    }
 
+    this.log(`智能摘要开始，共 ${rows.length} 条长 fact 需要摘要`)
     let compressed = 0
 
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE)
+      this.log(`摘要第 ${i + 1}-${Math.min(i + BATCH_SIZE, rows.length)} 条...`)
       const factList = batch.map(f => `[${f.fact_id}] ${f.content}`).join('\n\n---\n\n')
 
       const messages: LLMMessage[] = [
@@ -105,11 +121,14 @@ export class DreamEngine {
           this.store.connection.prepare('UPDATE facts SET summary = ? WHERE fact_id = ?').run(truncated, item.fact_id)
           compressed++
         }
-      } catch {
+        this.log(`本批摘要 ${result.summaries.length} 条`)
+      } catch (e) {
+        this.log(`摘要批次失败: ${(e as Error).message?.slice(0, 80)}`)
         continue
       }
     }
 
+    this.log(`智能摘要完成: ${compressed} 条`)
     return compressed
   }
 
@@ -118,13 +137,18 @@ export class DreamEngine {
       "SELECT fact_id, content FROM facts WHERE category = 'general'"
     ).all() as Array<{ fact_id: number; content: string }>
 
-    if (rows.length === 0) return 0
+    if (rows.length === 0) {
+      this.log('智能分类: 无 general fact 需要分类')
+      return 0
+    }
 
+    this.log(`智能分类开始，共 ${rows.length} 条 general fact`)
     const validCategories = ['identity', 'coding_style', 'tool_pref', 'workflow']
     let reclassified = 0
 
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE)
+      this.log(`分类第 ${i + 1}-${Math.min(i + BATCH_SIZE, rows.length)} 条...`)
       const factList = batch.map(f => `[${f.fact_id}] ${f.content}`).join('\n')
 
       const messages: LLMMessage[] = [
@@ -150,13 +174,16 @@ export class DreamEngine {
           this.store.connection.prepare(
             "UPDATE facts SET category = ?, updated_at = datetime('now', 'localtime') WHERE fact_id = ?"
           ).run(item.to, item.fact_id)
+          this.log(`#${item.fact_id} → ${item.to}`)
           reclassified++
         }
-      } catch {
+      } catch (e) {
+        this.log(`分类批次失败: ${(e as Error).message?.slice(0, 80)}`)
         continue
       }
     }
 
+    this.log(`智能分类完成: ${reclassified} 条`)
     return reclassified
   }
 }
