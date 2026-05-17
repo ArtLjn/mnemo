@@ -427,6 +427,20 @@ export class MemoryStore {
     return rows.map(r => this.rowToFact(r))
   }
 
+  /** 列出超长 fact（用于 cleanup 报告） */
+  listOversizedFacts(maxLength: number): Array<{ fact_id: number; length: number; preview: string; category: string }> {
+    const rows = this.db.prepare(
+      'SELECT fact_id, content, category FROM facts WHERE length(content) > ? ORDER BY length(content) DESC'
+    ).all(maxLength) as Array<{ fact_id: number; content: string; category: string }>
+
+    return rows.map(r => ({
+      fact_id: r.fact_id,
+      length: r.content.length,
+      preview: r.content.slice(0, 100),
+      category: r.category,
+    }))
+  }
+
   /** 记录反馈，调整信任评分 */
   recordFeedback(factId: number, helpful: boolean): { oldTrust: number; newTrust: number; helpfulCount: number } {
     const row = this.db.prepare(

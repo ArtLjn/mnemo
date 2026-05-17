@@ -55,7 +55,7 @@ export interface RetrieverOptions {
 
 /** fact_store 工具调用参数 */
 export interface FactStoreArgs {
-  action: 'add' | 'search' | 'probe' | 'related' | 'reason' | 'contradict' | 'update' | 'remove' | 'list' | 'learn' | 'audit' | 'dream'
+  action: 'add' | 'search' | 'probe' | 'related' | 'reason' | 'contradict' | 'update' | 'remove' | 'list' | 'learn' | 'audit' | 'dream' | 'cleanup'
   content?: string | string[]
   query?: string
   entity?: string

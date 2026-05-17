@@ -27,7 +27,7 @@ const FACT_STORE_DESCRIPTION = `结构化事实记忆系统（SQLite+FTS5 索引
 写入时先 search 检查是否已存在相似事实。identity/coding_style/tool_pref/workflow/general → 全局库，project → 项目库。`
 
 const factStoreSchema = {
-  action: z.enum(['add', 'search', 'probe', 'related', 'reason', 'contradict', 'update', 'remove', 'list', 'learn', 'audit', 'dream']),
+  action: z.enum(['add', 'search', 'probe', 'related', 'reason', 'contradict', 'update', 'remove', 'list', 'learn', 'audit', 'dream', 'cleanup']),
   content: z.union([z.string(), z.array(z.string())]).optional().describe("事实内容（'add' 必需，支持批量）"),
   summary: z.string().optional().describe('超长事实的摘要（检索用 summary 匹配）'),
   query: z.string().optional().describe("搜索查询（'search' 必需）"),
@@ -233,6 +233,11 @@ server.tool(
           retriever.getCache().clear()
           resourceManager.invalidate()
           return { content: [{ type: 'text' as const, text: JSON.stringify(report) }] }
+        }
+
+        case 'cleanup': {
+          const oversized = store.listOversizedFacts(300)
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ oversized, count: oversized.length }) }] }
         }
 
         case 'list': {
