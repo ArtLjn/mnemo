@@ -15,10 +15,13 @@ AI 编程助手在会话结束后会忘记所有内容。`CLAUDE.md` 只能存�
 mnemo 为你的 AI 助手提供**可搜索、结构化的记忆层**，跨会话持久化：
 
 - **语义搜索** — FTS5 全文检索 + Jaccard 重排序 + 中英双语扩展
+- **会话预热** — MCP Resources 在会话启动时自动注入高频记忆，零工具调用
+- **查询提炼** — 搜索前自动剥离动作词和噪声词
 - **信任评分** — 事实随时间根据反馈和衰减获得或失去信任
 - **实体图谱** — 自动实体抽取，支持多跳关联查询
 - **矛盾检测** — 发现冲突事实并降级较旧的那条
 - **自动去重** — 三层去重机制（实体重叠、Jaccard 相似度、包含检测）
+- **LLM 驱动的 Dream** — 合并同主题、精简冗长内容、解决矛盾
 
 ## 快速开始
 
@@ -49,16 +52,27 @@ claude mcp add mnemo -- mnemo
 
 你有 mnemo 记忆工具（fact_store / fact_feedback）。规则：
 
-## 规则 1：回复前搜索
-收到用户消息后，调用 `fact_store(action="search", query="<用户消息的关键词>")`。
-必须从用户消息中动态提取关键词，不要用固定模板。
+## 规则 1：会话预热（自动）
+mnemo MCP Resources 在会话启动时自动注入全局记忆到 system context。
+你不需要主动调用 fact_store(search) 来获取高频记忆。
 
-## 规则 2：按需写入
-用户说"记住"时，调用 `fact_store(action="add", content="...", category="...")`。
+## 规则 2：按需查询
+仅在以下情况调用 fact_store(action="search")：
+- 用户消息涉及个人偏好/习惯/工具选择且预热中未覆盖
+- 用户明确查询记忆（"我之前说过什么""按我的习惯"）
+- 技术选型时需要确认用户偏好
+
+不触发查询的情况：
+- 纯操作指令（"运行测试""git commit"）
+- 通用技术问题（"Promise 怎么用"）
+- 代码审查/解释请求
+
+## 规则 3：按需写入
+用户说"记住"时，调用 fact_store(action="add", content="...", category="...")。
 先搜索避免重复。类别：identity / coding_style / tool_pref / workflow / general。
 
-## 规则 3：反馈强化
-记忆有用时，调用 `fact_feedback(action="helpful", fact_id=...)`。
+## 规则 4：反馈强化
+记忆有用时，调用 fact_feedback(action="helpful", fact_id=...)。
 ```
 
 **3. 在 `~/.claude/settings.json` 中允许工具：**
@@ -92,7 +106,7 @@ claude mcp add mnemo -- mnemo
 
 ### `fact_store`
 
-读写结构化事实的主工具，支持 9 种操作：
+读写结构化事实的主工具，支持 12 种操作：
 
 | 操作 | 说明 | 关键参数 |
 |------|------|----------|
@@ -105,6 +119,9 @@ claude mcp add mnemo -- mnemo
 | `update` | 更新事实的内容、标签、类别或信任分 | `fact_id`、`content`、`tags`、`category`、`trust_delta` |
 | `remove` | 按 ID 删除事实 | `fact_id` |
 | `list` | 按信任分浏览事实 | `category`、`min_trust`、`limit` |
+| `learn` | 自学习：根据使用统计提升/降级/老化事实 | — |
+| `audit` | 质量报告，不修改数据 | — |
+| `dream` | LLM 驱动的记忆整理：合并 + 精简 + 解决矛盾 | — |
 
 ### `fact_feedback`
 
@@ -115,22 +132,48 @@ claude mcp add mnemo -- mnemo
 | `helpful` | +0.05 信任 |
 | `unhelpful` | -0.10 信任 |
 
-## 架构
+## Dream 整理周期
 
+mnemo 内置 LLM 驱动的 dream 周期，保持记忆库整洁高效：
+
+```bash
+mnemo-dream
 ```
-┌───────────────────┐   stdio    ┌────────────┐   SQLite    ┌─────────────────────┐
-│   MCP Client      │◄─────────►│  mnemo     │◄───────────►│ ~/.mnemo/facts.db   │
-│ (Claude / Codex)  │   JSON    │  server    │             │                     │
-└───────────────────┘           └─────┬──────┘             │ 数据表：             │
-                                      │                    │   facts             │
-                               ┌──────┴──────┐             │   entities          │
-                               │             │             │   fact_entities     │
-                               │  Retriever  │  Security   │ 索引：              │
-                               │  (搜索、    │  (PII 扫描、 │   facts_fts (FTS5)  │
-                               │   探测、    │   注入检测)  │   idx_facts_trust   │
-                               │   推理)     │             │   idx_facts_category│
-                               └─────────────┘             └─────────────────────┘
+
+**两阶段管线：**
+
+1. **合并** — LLM 识别同主题事实并合并为一条完整条目。检测矛盾并以较新信息为准。
+2. **精简** — LLM 压缩冗长内容，保留所有关键信息（URL、邮箱、数字、人名、配置参数）。
+
+**安全保护：**
+- 执行前自动备份（`~/.mnemo/backup/`）
+- 高信任分事实（> 0.8）受保护不被删除
+- 高频检索事实（> 100 次）受保护
+- LLM 不可用时自动降级到规则引擎
+
+**配置**（`~/.mnemo/config.json`）：
+
+```json
+{
+  "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "apiKey": "your-api-key",
+  "model": "qwen3.5-122b-a10b"
+}
 ```
+
+## MCP Resources
+
+mnemo 提供 5 个全局类别资源，用于**零成本的会话预热**：
+
+| 资源 URI | 说明 |
+|----------|------|
+| `mnemo://global/identity` | 身份事实（信任分前 10） |
+| `mnemo://global/coding_style` | 编码风格偏好 |
+| `mnemo://global/tool_pref` | 工具偏好 |
+| `mnemo://global/workflow` | 工作流偏好 |
+| `mnemo://global/general` | 通用事实 |
+
+MCP 客户端（Claude Code、Codex）在会话启动时自动获取这些资源，无需任何工具调用即可注入记忆。
 
 ## 类别
 

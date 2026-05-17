@@ -21,6 +21,7 @@ mnemo gives your AI assistant a **searchable, structured memory layer** that per
 - **Entity graph** — automatic entity extraction with multi-hop relationship queries
 - **Contradiction detection** — finds conflicting facts and demotes the older one
 - **Auto-dedup** — three-layer deduplication prevents duplicate facts
+- **LLM-driven dream** — merge same-topic facts, compress long content, resolve contradictions
 
 ## Quick Start
 
@@ -105,7 +106,7 @@ Add to your Codex MCP configuration:
 
 ### `fact_store`
 
-The primary tool for reading and writing structured facts. Supports 9 actions:
+The primary tool for reading and writing structured facts. Supports 12 actions:
 
 | Action | Description | Key Parameters |
 |--------|-------------|----------------|
@@ -118,6 +119,9 @@ The primary tool for reading and writing structured facts. Supports 9 actions:
 | `update` | Update an existing fact's content, tags, category, or trust score | `fact_id`, `content`, `tags`, `category`, `trust_delta` |
 | `remove` | Delete a fact by ID | `fact_id` |
 | `list` | Browse facts sorted by trust score | `category`, `min_trust`, `limit` |
+| `learn` | Run self-learning: promote/demote/age facts based on usage stats | — |
+| `audit` | Quality report without modifying data | — |
+| `dream` | LLM-driven memory consolidation: merge + compress + resolve contradictions | — |
 
 ### `fact_feedback`
 
@@ -127,6 +131,35 @@ Rate a fact after use. Good facts rise, bad facts decay.
 |--------|--------|
 | `helpful` | +0.05 trust |
 | `unhelpful` | -0.10 trust |
+
+## Dream Cycle
+
+mnemo includes an LLM-driven dream cycle that keeps your memory clean and efficient:
+
+```bash
+mnemo-dream
+```
+
+**Two-phase pipeline:**
+
+1. **Merge** — LLM identifies same-topic facts and merges them into one complete entry. Resolves contradictions by preferring newer information.
+2. **Compress** — LLM condenses verbose content while preserving all key facts (URLs, emails, numbers, names, config params).
+
+**Safety features:**
+- Auto-backup before any changes (`~/.mnemo/backup/`)
+- High-trust facts (score > 0.8) are protected from deletion
+- High-frequency facts (retrieved > 100 times) are protected
+- Falls back to rule-based engine when LLM is unavailable
+
+**Configuration** (`~/.mnemo/config.json`):
+
+```json
+{
+  "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "apiKey": "your-api-key",
+  "model": "qwen3.5-122b-a10b"
+}
+```
 
 ## MCP Resources
 
@@ -140,7 +173,7 @@ mnemo exposes 5 global category resources for **zero-cost session warmup**:
 | `mnemo://global/workflow` | Workflow preferences |
 | `mnemo://global/general` | General facts |
 
-MCP clients (Claude Code, Codex) automatically fetch these resources at session start, injecting memory into system context without any tool calls. This eliminates the need for "search every message" patterns.
+MCP clients (Claude Code, Codex) automatically fetch these resources at session start, injecting memory into system context without any tool calls.
 
 ## Architecture
 
@@ -152,13 +185,13 @@ MCP clients (Claude Code, Codex) automatically fetch these resources at session 
 │  Auto-fetch:      │                 │                    │   facts             │
 │  mnemo://global/* │      ┌──────────┼──────────┐         │   entities          │
 │  (session warmup) │      │          │          │         │   fact_entities     │
-└───────────────────┘      │          │          │         │ Indexes:            │
-                           │          │          │         │   facts_fts (FTS5)  │
-                     Resources   Retriever   Security       │   idx_facts_trust   │
-                     (warmup,   (search,    (PII scan,     │   idx_facts_category│
-                      cache)     probe,     injection      └─────────────────────┘
-                                 reason)    detection)
-                                └──────────────────┘
+└───────────────────┘      │          │          │         │   retrieval_log     │
+                           │          │          │         │ Indexes:            │
+                     Resources   Retriever   Dream        │   facts_fts (FTS5)  │
+                     (warmup,   (search,    Engine        │   idx_facts_trust   │
+                      cache)     probe,     (merge,       │   idx_facts_category│
+                                 reason,    compress)     └─────────────────────┘
+                                 refine)
 ```
 
 ## Categories

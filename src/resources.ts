@@ -78,7 +78,7 @@ export class ResourceManager {
       f.content.includes('角色设定') ||
       f.content.includes('你是') ||
       f.content.includes('身份是') ||
-      f.content.includes('女朋友')
+      f.content.includes('你扮演')
     )
     const otherFacts = facts.filter(f => !roleFacts.includes(f))
 
