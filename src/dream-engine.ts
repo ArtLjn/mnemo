@@ -6,14 +6,7 @@ const BATCH_SIZE = 20
 const MAX_DELETE_RATIO = 0.1
 const TRUST_DELETE_LIMIT = 0.8
 const RETRIEVAL_DELETE_LIMIT = 100
-const MAX_CONTENT_CHARS = 500
 const MAX_COMPRESS_CHARS = 2000
-
-function truncateContent(content: string, summary: string | null): string {
-  if (summary) return summary
-  if (content.length <= MAX_CONTENT_CHARS) return content
-  return content.slice(0, MAX_CONTENT_CHARS) + `...[共${content.length}字，已截断]`
-}
 
 export class DreamEngine {
   constructor(private llm: LLMClient, private store: MemoryStore) {}
@@ -41,24 +34,25 @@ export class DreamEngine {
       for (let i = 0; i < facts.length; i += BATCH_SIZE) {
         const batch = facts.slice(i, i + BATCH_SIZE)
         this.log(`[${cat}] 分析第 ${i + 1}-${Math.min(i + BATCH_SIZE, facts.length)} 条 (共 ${facts.length} 条)...`)
-        const factList = batch.map(f => `[${f.factId}] ${truncateContent(f.content, f.summary)}`).join('\n')
+        const factList = batch.map(f => `[${f.factId}] ${f.content}`).join('\n')
 
         const messages: LLMMessage[] = [
           {
             role: 'system',
-            content: `你是一个记忆整理助手。分析以下同一分类(${cat})的记忆条目，找出语义重复的条目对。
-只输出JSON，格式：{"merges": [{"kept": 保留的fact_id, "removed": 删除的fact_id, "reason": "原因"}]}
-如果没有语义重复的条目，输出：{"merges": []}
+            content: `你是一个记忆整理助手。分析以下同一分类(${cat})的记忆条目，找出讲述同一主题的条目对。
+将它们的完整信息合并为一条更完整的记忆。
+只输出JSON，格式：{"merges": [{"kept": 保留的fact_id, "removed": 删除的fact_id, "merged_content": "合并后的完整内容", "reason": "原因"}]}
+如果没有同主题的条目，输出：{"merges": []}
 规则：
-- 保留内容更完整、信息量更大的条目
-- 用词不同但意思相同的条目应合并（如"喜欢VS Code"和"偏好Visual Studio Code"）
+- 保留所有关键信息：URL、邮箱、数字、人名、配置参数
+- 合并后内容应比任一原文更完整
 - 不要合并只是主题相关但内容不同的条目`,
           },
           { role: 'user', content: factList },
         ]
 
         try {
-          const result = await this.llm.chatJSON<{ merges: Array<{ kept: number | string; removed: number | string; reason: string }> }>(messages)
+          const result = await this.llm.chatJSON<{ merges: Array<{ kept: number | string; removed: number | string; merged_content?: string; reason: string }> }>(messages)
           if (!result?.merges || !Array.isArray(result.merges)) continue
 
           for (const merge of result.merges) {
@@ -74,6 +68,14 @@ export class DreamEngine {
 
             const toKeep = this.store.listFacts(cat, 0, 200).find(f => f.factId === keptId)
             if (!toKeep) continue
+
+            // 如果 LLM 提供了合并内容，覆写 kept fact 的 content
+            if (merge.merged_content && merge.merged_content.length > 0) {
+              this.store.connection.prepare(
+                "UPDATE facts SET content = ?, updated_at = datetime('now', 'localtime') WHERE fact_id = ?"
+              ).run(merge.merged_content, keptId)
+              this.log(`合并内容: #${keptId} content 已更新`)
+            }
 
             this.store.removeFact(removedId)
             details.push({ kept: keptId, removed: removedId, reason: merge.reason })
@@ -162,7 +164,7 @@ export class DreamEngine {
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE)
       this.log(`分类第 ${i + 1}-${Math.min(i + BATCH_SIZE, rows.length)} 条...`)
-      const factList = batch.map(f => `[${f.fact_id}] ${truncateContent(f.content, f.summary)}`).join('\n')
+      const factList = batch.map(f => `[${f.fact_id}] ${f.content}`).join('\n')
 
       const messages: LLMMessage[] = [
         {
