@@ -110,7 +110,7 @@ mnemo MCP Resources 在会话启动时自动注入全局记忆到 system context
 
 | 操作 | 说明 | 关键参数 |
 |------|------|----------|
-| `add` | 添加事实（自动去重，相似则合并） | `content`、`category`、`tags` |
+| `add` | 添加事实（自动去重，相似则合并，单条 ≤300 字） | `content`、`category`、`tags` |
 | `search` | 关键词搜索（FTS5 + Jaccard 重排序） | `query`、`category`、`min_trust`、`limit` |
 | `probe` | 查找某实体的所有事实 | `entity`、`min_trust`、`limit` |
 | `related` | 通过共享上下文查找关联事实 | `entity`、`min_trust`、`limit` |
@@ -122,6 +122,7 @@ mnemo MCP Resources 在会话启动时自动注入全局记忆到 system context
 | `learn` | 自学习：根据使用统计提升/降级/老化事实 | — |
 | `audit` | 质量报告，不修改数据 | — |
 | `dream` | LLM 驱动的记忆整理：合并 + 精简 + 解决矛盾 | — |
+| `cleanup` | 扫描超长 fact，报告需要拆分的条目 | — |
 
 ### `fact_feedback`
 

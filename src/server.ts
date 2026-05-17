@@ -20,11 +20,12 @@ const FACT_STORE_DESCRIPTION = `结构化事实记忆系统（SQLite+FTS5 索引
 - reason — 组合推理：同时关联多个实体的事实
 - contradict — 矛盾检测
 - list — 浏览事实
-- add — 添加新事实（自动去重，相似则更新）
+- add — 添加新事实（自动去重，相似则更新，单条 ≤300 字）
 - update — 更新已有事实
 - remove — 删除事实
+- cleanup — 扫描超长 fact 报告
 
-写入时先 search 检查是否已存在相似事实。identity/coding_style/tool_pref/workflow/general → 全局库，project → 项目库。`
+写入时先 search 检查是否已存在相似事实。单条 content 不超过 300 字，聚焦一个主题。`
 
 const factStoreSchema = {
   action: z.enum(['add', 'search', 'probe', 'related', 'reason', 'contradict', 'update', 'remove', 'list', 'learn', 'audit', 'dream', 'cleanup']),

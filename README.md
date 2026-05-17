@@ -110,7 +110,7 @@ The primary tool for reading and writing structured facts. Supports 12 actions:
 
 | Action | Description | Key Parameters |
 |--------|-------------|----------------|
-| `add` | Add a new fact (auto-deduplicates; merges if similar exists) | `content`, `category`, `tags` |
+| `add` | Add a new fact (auto-dedup; merges if similar; max 300 chars) | `content`, `category`, `tags` |
 | `search` | Keyword search with FTS5 + Jaccard reranking | `query`, `category`, `min_trust`, `limit` |
 | `probe` | Find all facts about a specific entity | `entity`, `min_trust`, `limit` |
 | `related` | Find facts related to an entity through shared context | `entity`, `min_trust`, `limit` |
@@ -122,6 +122,7 @@ The primary tool for reading and writing structured facts. Supports 12 actions:
 | `learn` | Run self-learning: promote/demote/age facts based on usage stats | — |
 | `audit` | Quality report without modifying data | — |
 | `dream` | LLM-driven memory consolidation: merge + compress + resolve contradictions | — |
+| `cleanup` | Scan for oversized facts that may need splitting | — |
 
 ### `fact_feedback`
 
