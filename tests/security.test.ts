@@ -78,4 +78,9 @@ describe('scanContentQuality', () => {
     expect(result.passed).toBe(false)
     expect(result.issues.some(i => i.includes('项目级内容'))).toBe(true)
   })
+
+  it('应允许纯工具偏好信息', () => {
+    const result = scanContentQuality('npm 账号: morningljn, scope @morningljn, 发布需 --registry')
+    expect(result.passed).toBe(true)
+  })
 })
