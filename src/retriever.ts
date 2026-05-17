@@ -119,8 +119,7 @@ export class FactRetriever {
     const scored: ScoredFact[] = []
 
     for (const fact of candidates) {
-      // summary 优先用于匹配
-      const matchText = fact.summary ?? fact.content
+      const matchText = fact.content
       const matchTokens = this.tokenize(matchText)
       const tagTokens = this.tokenize(fact.tags)
       const allTokens = new Set([...matchTokens, ...tagTokens])

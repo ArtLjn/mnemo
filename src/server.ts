@@ -55,7 +55,7 @@ function resolveCategory(category?: string): FactCategory {
 function toCompactResult(f: ScoredFact): CompactFactResult {
   return {
     factId: f.factId,
-    display: f.summary ?? (f.content.length > 100 ? f.content.slice(0, 100) + '...' : f.content),
+    display: f.content,
     category: f.category,
     trustScore: Math.round(f.trustScore * 100) / 100,
     score: Math.round(f.score * 1000) / 1000,
