@@ -5,7 +5,7 @@
  * 三重扫描：提示注入检测、PII 检测、不可见 Unicode 检测。
  */
 
-import type { SecurityScanResult } from './types.js'
+import type { SecurityScanResult, ContentQualityResult } from './types.js'
 
 // -- 提示注入检测 ---
 
@@ -129,4 +129,79 @@ export function fullSecurityScan(text: string): SecurityScanResult {
     hasPii: pii.hasPii,
     injectionAttempts: injection.injectionAttempts,
   }
+}
+
+// -- 内容质量门控 --
+
+const MAX_CONTENT_LENGTH = 300
+
+/** 主题类别信号词 */
+const TOPIC_SIGNALS: Record<string, RegExp[]> = {
+  credential: [
+    /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/,
+    /密码|password|passwd/i,
+    /SSH|ssh/,
+    /token|Token/,
+    /API[_\s]?[Kk]ey/i,
+  ],
+  infrastructure: [
+    /Docker\s*Compose|docker[-\s]?compose/i,
+    /Kubernetes|k8s/i,
+    /Nginx|nginx/,
+    /Qdrant|Prometheus|Grafana|FastAPI/i,
+    /:\d{4,5}\)/,
+  ],
+  devtool: [
+    /\bnpm\b/,
+    /\byarn\b/,
+    /\bpip\b/,
+    /\bconda\b/,
+  ],
+  project: [
+    /\/home\/[\w-]+\/[\w.-]+(?:\/[\w.-]+)*\//,
+    /\/opt\/[\w-]+\/[\w.-]+(?:\/[\w.-]+)*\//,
+    /部署架构/,
+    /环境变量优先级/,
+    /文件结构/,
+  ],
+}
+
+/** 项目级内容模式（偏好陈述不算） */
+const PROJECT_CONTENT_PATTERNS = [
+  /[\w-]+\(:\d{2,5}\)[+\s]*(?:[\w-]+\(:\d{2,5}\))/,
+  /Docker\s*Compose\s*v?\d/i,
+  /配置优先级.*environment/i,
+  /容器内用宿主机/i,
+  /\/home\/[\w-]+\/[\w.-]+(?:\/[\w.-]+)*\//,
+  /\/opt\/[\w-]+\/[\w.-]+(?:\/[\w.-]+)*\//,
+]
+
+export function scanContentQuality(content: string): ContentQualityResult {
+  const issues: string[] = []
+
+  if (content.length > MAX_CONTENT_LENGTH) {
+    issues.push(`content 超过 ${MAX_CONTENT_LENGTH} 字限制（当前 ${content.length} 字），请拆分为多条聚焦的记忆`)
+  }
+
+  const hitCategories: string[] = []
+  for (const [cat, patterns] of Object.entries(TOPIC_SIGNALS)) {
+    for (const p of patterns) {
+      if (p.test(content)) {
+        hitCategories.push(cat)
+        break
+      }
+    }
+  }
+  if (hitCategories.length >= 2) {
+    issues.push(`检测到多主题混合内容（${hitCategories.join('、')}），请拆分为多条独立记忆`)
+  }
+
+  for (const p of PROJECT_CONTENT_PATTERNS) {
+    if (p.test(content)) {
+      issues.push('检测到项目级内容，mnemo 只存储用户习惯和偏好，不存储项目知识')
+      break
+    }
+  }
+
+  return { passed: issues.length === 0, issues }
 }

@@ -83,6 +83,12 @@ export interface SecurityScanResult {
   injectionAttempts: string[]
 }
 
+/** 内容质量扫描结果 */
+export interface ContentQualityResult {
+  passed: boolean
+  issues: string[]
+}
+
 /** Dream 整理报告 */
 export interface DreamReport {
   merged: number
