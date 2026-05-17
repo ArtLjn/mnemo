@@ -6,6 +6,12 @@ const BATCH_SIZE = 20
 const MAX_DELETE_RATIO = 0.1
 const TRUST_DELETE_LIMIT = 0.8
 const RETRIEVAL_DELETE_LIMIT = 100
+const MAX_CONTENT_CHARS = 500
+
+function truncateContent(content: string, summary: string | null): string {
+  const text = summary || content
+  return text.length > MAX_CONTENT_CHARS ? text.slice(0, MAX_CONTENT_CHARS) + '...' : text
+}
 
 export class DreamEngine {
   constructor(private llm: LLMClient, private store: MemoryStore) {}
@@ -33,7 +39,7 @@ export class DreamEngine {
       for (let i = 0; i < facts.length; i += BATCH_SIZE) {
         const batch = facts.slice(i, i + BATCH_SIZE)
         this.log(`[${cat}] 分析第 ${i + 1}-${Math.min(i + BATCH_SIZE, facts.length)} 条 (共 ${facts.length} 条)...`)
-        const factList = batch.map(f => `[${f.factId}] ${f.content}`).join('\n')
+        const factList = batch.map(f => `[${f.factId}] ${truncateContent(f.content, f.summary)}`).join('\n')
 
         const messages: LLMMessage[] = [
           {
@@ -69,7 +75,7 @@ export class DreamEngine {
 
             this.store.removeFact(removedId)
             details.push({ kept: keptId, removed: removedId, reason: merge.reason })
-            this.log(`合并: #${merge.removed} → #${merge.kept} (${merge.reason})`)
+            this.log(`合并: #${removedId} → #${keptId} (${merge.reason})`)
             merged++
           }
         } catch (e) {
@@ -85,8 +91,8 @@ export class DreamEngine {
 
   async smartCompress(): Promise<number> {
     const rows = this.store.connection.prepare(
-      "SELECT fact_id, content FROM facts WHERE length(content) > 200 AND (summary IS NULL OR summary = '')"
-    ).all() as Array<{ fact_id: number; content: string }>
+      "SELECT fact_id, content, summary FROM facts WHERE length(content) > 200 AND (summary IS NULL OR summary = '')"
+    ).all() as Array<{ fact_id: number; content: string; summary: string | null }>
 
     if (rows.length === 0) {
       this.log('智能摘要: 无需摘要的 fact')
@@ -99,7 +105,7 @@ export class DreamEngine {
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE)
       this.log(`摘要第 ${i + 1}-${Math.min(i + BATCH_SIZE, rows.length)} 条...`)
-      const factList = batch.map(f => `[${f.fact_id}] ${f.content}`).join('\n\n---\n\n')
+      const factList = batch.map(f => `[${f.fact_id}] ${truncateContent(f.content, f.summary)}`).join('\n\n---\n\n')
 
       const messages: LLMMessage[] = [
         {
@@ -134,8 +140,8 @@ export class DreamEngine {
 
   async smartReclassify(): Promise<number> {
     const rows = this.store.connection.prepare(
-      "SELECT fact_id, content FROM facts WHERE category = 'general'"
-    ).all() as Array<{ fact_id: number; content: string }>
+      "SELECT fact_id, content, summary FROM facts WHERE category = 'general'"
+    ).all() as Array<{ fact_id: number; content: string; summary: string | null }>
 
     if (rows.length === 0) {
       this.log('智能分类: 无 general fact 需要分类')
@@ -149,7 +155,7 @@ export class DreamEngine {
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE)
       this.log(`分类第 ${i + 1}-${Math.min(i + BATCH_SIZE, rows.length)} 条...`)
-      const factList = batch.map(f => `[${f.fact_id}] ${f.content}`).join('\n')
+      const factList = batch.map(f => `[${f.fact_id}] ${truncateContent(f.content, f.summary)}`).join('\n')
 
       const messages: LLMMessage[] = [
         {
@@ -164,17 +170,18 @@ export class DreamEngine {
       ]
 
       try {
-        const result = await this.llm.chatJSON<{ reclassify: Array<{ fact_id: number; to: string }> }>(messages)
+        const result = await this.llm.chatJSON<{ reclassify: Array<{ fact_id: number | string; to: string }> }>(messages)
         if (!result?.reclassify || !Array.isArray(result.reclassify)) continue
 
         for (const item of result.reclassify) {
-          if (!item.fact_id || !item.to) continue
+          const factId = Number(item.fact_id)
+          if (!factId || !item.to) continue
           if (!validCategories.includes(item.to)) continue
 
           this.store.connection.prepare(
             "UPDATE facts SET category = ?, updated_at = datetime('now', 'localtime') WHERE fact_id = ?"
-          ).run(item.to, item.fact_id)
-          this.log(`#${item.fact_id} → ${item.to}`)
+          ).run(item.to, factId)
+          this.log(`#${factId} → ${item.to}`)
           reclassified++
         }
       } catch (e) {
