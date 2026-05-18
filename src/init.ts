@@ -18,7 +18,10 @@ const CLAUDE_DIR = join(homedir(), '.claude')
 const CLAUDE_MD_PATH = join(CLAUDE_DIR, 'CLAUDE.md')
 const SETTINGS_PATH = join(CLAUDE_DIR, 'settings.json')
 
-const MEMORY_RULES = `
+const RULES_START = '<!-- mnemo-rules:start -->'
+const RULES_END = '<!-- mnemo-rules:end -->'
+
+const MEMORY_RULES = `${RULES_START}
 
 # mnemo 记忆系统
 
@@ -26,7 +29,7 @@ const MEMORY_RULES = `
 - 用户说"记住"→ fact_store(add)，先 search 去重
 - 成功使用记忆 → fact_feedback(helpful, fact_id)
 - 完成复杂任务后，如果发现了新的习惯/偏好/决策/工作流，用 fact_store(auto_observe, category=对应分类) 自动记录。分类参考：identity（身份）、coding_style（编码习惯）、tool_pref（工具偏好）、workflow（工作流）、general（通用知识）
-`
+${RULES_END}`
 
 const MCP_TOOLS = [
   'mcp__mnemo__fact_store',
@@ -77,12 +80,48 @@ function writeClaudeMd() {
   let existing = ''
   if (existsSync(CLAUDE_MD_PATH)) {
     existing = readFileSync(CLAUDE_MD_PATH, 'utf-8')
-    if (existing.includes('mnemo 记忆工具')) {
-      warn('CLAUDE.md 已包含 mnemo 规则，跳过')
+  }
+
+  // 有标记 → 替换旧规则块为新版本
+  if (existing.includes(RULES_START)) {
+    const startIdx = existing.indexOf(RULES_START)
+    const endIdx = existing.indexOf(RULES_END) + RULES_END.length
+    const updated = existing.slice(0, startIdx) + MEMORY_RULES + existing.slice(endIdx)
+    writeFileSync(CLAUDE_MD_PATH, updated)
+    ok('记忆规则已更新到最新版本')
+    return
+  }
+
+  // 无标记但包含旧版规则（兼容升级）→ 替换旧规则
+  const legacyMarker = 'mnemo 记忆工具'
+  if (existing.includes(legacyMarker)) {
+    // 找到旧规则块：从 "# mnemo 记忆系统" 或包含 legacyMarker 的行开始
+    const lines = existing.split('\n')
+    let ruleStart = -1
+    let ruleEnd = -1
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('# mnemo 记忆系统') || lines[i].includes(legacyMarker)) {
+        if (ruleStart === -1) ruleStart = i
+      }
+      if (ruleStart !== -1 && ruleEnd === -1) {
+        // 找到规则块结尾：空行后跟非规则内容
+        if (i > ruleStart && lines[i].trim() === '') {
+          ruleEnd = i
+        }
+      }
+    }
+    if (ruleStart !== -1) {
+      if (ruleEnd === -1) ruleEnd = lines.length
+      const before = lines.slice(0, ruleStart).join('\n').trimEnd()
+      const after = lines.slice(ruleEnd).join('\n')
+      const updated = before + '\n' + MEMORY_RULES + (after.trim() ? '\n' + after : '')
+      writeFileSync(CLAUDE_MD_PATH, updated)
+      ok('记忆规则已从旧版升级到最新版本')
       return
     }
   }
 
+  // 首次写入
   const merged = existing
     ? existing.trimEnd() + '\n' + MEMORY_RULES
     : MEMORY_RULES.trimStart()
