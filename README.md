@@ -53,6 +53,7 @@ claude mcp add mnemo -- mnemo
 - Identity questions ("who are you") → fact_store(search, query="角色设定") first, answer per settings
 - User says "remember" → fact_store(add), search first to deduplicate
 - When a memory was useful → fact_feedback(helpful, fact_id)
+- After complex tasks, auto-detect new habits/preferences/decisions/workflows → fact_store(auto_observe, category=...)
 ```
 
 **3. Allow tools in `~/.claude/settings.json`:**

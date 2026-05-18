@@ -23,12 +23,13 @@ const FACT_STORE_DESCRIPTION = `结构化事实记忆系统（SQLite+FTS5 索引
 - add — 添加新事实（自动去重，相似则更新，单条 ≤300 字）
 - update — 更新已有事实
 - remove — 删除事实
+- auto_observe — 自动保存工作流/偏好记忆（AI 完成任务后调用，trust=0.3 起步）
 - cleanup — 扫描超长 fact 报告
 
 写入时先 search 检查是否已存在相似事实。单条 content 不超过 300 字，聚焦一个主题。`
 
 const factStoreSchema = {
-  action: z.enum(['add', 'search', 'probe', 'related', 'reason', 'contradict', 'update', 'remove', 'list', 'learn', 'audit', 'dream', 'cleanup']),
+  action: z.enum(['add', 'search', 'probe', 'related', 'reason', 'contradict', 'update', 'remove', 'list', 'learn', 'audit', 'dream', 'cleanup', 'auto_observe']),
   content: z.union([z.string(), z.array(z.string())]).optional().describe("事实内容（'add' 必需，支持批量）"),
   summary: z.string().optional().describe('超长事实的摘要（检索用 summary 匹配）'),
   query: z.string().optional().describe("搜索查询（'search' 必需）"),
@@ -234,6 +235,29 @@ server.tool(
           retriever.getCache().clear()
           resourceManager.invalidate()
           return { content: [{ type: 'text' as const, text: JSON.stringify(report) }] }
+        }
+
+        case 'auto_observe': {
+          if (!a.content) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Missing required argument: content' }) }] }
+          const observeContent = (Array.isArray(a.content) ? a.content[0] : a.content).trim()
+          if (!observeContent) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'empty content' }) }] }
+
+          const quality = scanContentQuality(observeContent)
+          if (!quality.passed) return { content: [{ type: 'text' as const, text: JSON.stringify({ saved: false, reason: quality.issues.join('; ') }) }] }
+
+          const similar = store.findSimilarFact(observeContent, category) ?? store.findSimilarFact(observeContent)
+          if (similar) {
+            return { content: [{ type: 'text' as const, text: JSON.stringify({ saved: false, reason: 'similar_exists', fact_id: similar.factId }) }] }
+          }
+
+          // AI 传了 category 就用，没传默认 workflow
+          const observeCategory = (a.category && category !== 'general') ? category : 'workflow' as FactCategory
+          const factId = store.addFactWithTrust(observeContent, observeCategory, a.tags ?? '', 0.3)
+          const demoted = store.demoteContradictingFacts(factId, observeContent, observeCategory)
+
+          retriever.getCache().clear()
+          resourceManager.invalidate()
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ saved: true, fact_id: factId, category: observeCategory, trust: 0.3, contradicted_demoted: demoted }) }] }
         }
 
         case 'cleanup': {

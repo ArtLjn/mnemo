@@ -53,6 +53,7 @@ claude mcp add mnemo -- mnemo
 - 身份问题（"你是谁"等）→ 先 fact_store(search, query="角色设定")，按设定回答
 - 用户说"记住"→ fact_store(add)，先 search 去重
 - 成功使用记忆 → fact_feedback(helpful, fact_id)
+- 完成复杂任务后，如果发现了新的习惯/偏好/决策/工作流，用 fact_store(auto_observe, category=对应分类) 自动记录
 ```
 
 **3. 在 `~/.claude/settings.json` 中允许工具：**

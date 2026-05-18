@@ -202,6 +202,13 @@ export class MemoryStore {
   // Public API
   // ------------------------------------------------------------------
 
+  /** 添加事实并指定初始信任评分，返回 fact_id */
+  addFactWithTrust(content: string, category: FactCategory = 'general', tags = '', trust: number): number {
+    const factId = this.addFact(content, category, tags)
+    this.db.prepare('UPDATE facts SET trust_score = ? WHERE fact_id = ?').run(trust, factId)
+    return factId
+  }
+
   /** 添加事实，返回 fact_id。精确重复返回已有 ID。 */
   addFact(content: string, category: FactCategory = 'general', tags = ''): number {
     const trimmed = content.trim()
