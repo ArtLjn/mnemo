@@ -48,31 +48,11 @@ claude mcp add mnemo -- mnemo
 **2. Add memory rules to `~/.claude/CLAUDE.md`:**
 
 ```markdown
-# Memory System
+# mnemo Memory System
 
-You have mnemo memory tools (fact_store / fact_feedback). Rules:
-
-## Rule 1: Session warmup (automatic)
-mnemo MCP Resources auto-inject global memory into system context at session start.
-You do NOT need to call fact_store(search) for high-frequency memories.
-
-## Rule 2: On-demand search
-Only call fact_store(action="search") when:
-- User message involves personal preferences/habits/tool choices not covered by warmup
-- User explicitly queries memory ("what did I say before", "per my habits")
-- Technical decisions need user preference confirmation
-
-Do NOT trigger search for:
-- Pure operations ("run tests", "git commit")
-- General tech questions ("how to use Promise")
-- Code review/explanation requests
-
-## Rule 3: Write on request
-When user says "remember", call `fact_store(action="add", content="...", category="...")`.
-Search first to avoid duplicates. Categories: identity / coding_style / tool_pref / workflow / general.
-
-## Rule 4: Feedback
-When a memory was useful, call `fact_feedback(action="helpful", fact_id=...)`.
+- Identity questions ("who are you") → fact_store(search, query="角色设定") first, answer per settings
+- User says "remember" → fact_store(add), search first to deduplicate
+- When a memory was useful → fact_feedback(helpful, fact_id)
 ```
 
 **3. Allow tools in `~/.claude/settings.json`:**
