@@ -2,7 +2,7 @@
  * 混合检索管线。
  * 移植自 Ocean CLI FactRetriever，使用 better-sqlite3。
  *
- * 管线：FTS5 候选集 → Jaccard 重排序 → 信任评分加权 → 时间衰减
+ * 管线：FTS5 候选集 → 自适应 RRF 融合（ftsRank + similarity + trust 三路 RRF）
  * 高级检索：probe/related/reason 基于 fact_entities 关联表
  * 矛盾检测：实体重叠 + 内容差异
  */
@@ -31,9 +31,8 @@ interface FtsCandidate extends Fact {
 
 export class FactRetriever {
   private db: Database.Database
-  private ftsWeight: number
-  private jaccardWeight: number
-  private halfLifeDays: number
+  /** RRF 融合常数 k，公式 score = Σ w_i / (k + rank_i) */
+  private rrfK: number
   /** 查询缓存（60s TTL，进程内 Map） */
   private cache: QueryCache
   /** 性能指标（MNEMO_DEBUG=1 时生效） */
@@ -48,9 +47,7 @@ export class FactRetriever {
     options?: RetrieverOptions,
   ) {
     this.db = store.connection
-    this.ftsWeight = options?.ftsWeight ?? 0.5
-    this.jaccardWeight = options?.jaccardWeight ?? 0.5
-    this.halfLifeDays = options?.temporalDecayHalfLife ?? 0
+    this.rrfK = options?.rrfK ?? 10
     this.cache = new QueryCache()
     this.metrics = new PerfMetrics()
   }
@@ -65,7 +62,7 @@ export class FactRetriever {
     return this.metrics
   }
 
-  /** 主搜索：FTS5 → LIKE → 字符交叉 → 分类推断 → Jaccard → 信任评分 → 时间衰减 */
+  /** 主搜索：FTS5 → LIKE → 字符交叉 → 分类推断 → 自适应 RRF 融合 */
   search(query: string, options?: SearchOptions & { skipRefine?: boolean }): ScoredFact[] {
     const startTime = performance.now()
     const minTrust = options?.minTrust ?? 0.3
@@ -113,38 +110,9 @@ export class FactRetriever {
       return []
     }
 
-    // Stage 2-4: Jaccard 重排序 + 信任评分 + 时间衰减 + length penalty
+    // Stage 2: 自适应 RRF 融合（ftsRank + similarity + trust 三路 RRF）
     const queryTokens = this.tokenize(searchQuery)
-
-    const scored: ScoredFact[] = []
-
-    for (const fact of candidates) {
-      const matchText = fact.content
-      const matchTokens = this.tokenize(matchText)
-      const tagTokens = this.tokenize(fact.tags)
-      const allTokens = new Set([...matchTokens, ...tagTokens])
-
-      const jaccard = this.jaccardSimilarity(queryTokens, allTokens)
-      const qInF = this.containmentScore(queryTokens, allTokens)
-      const similarity = 0.3 * jaccard + 0.7 * qInF
-      const ftsScore = fact.ftsRank
-
-      // 静态权重 0.5/0.5（回退 v3 动态权重）
-      const relevance = 0.5 * ftsScore + 0.5 * similarity
-      let score = relevance * fact.trustScore
-
-      // 时间衰减
-      if (this.halfLifeDays > 0) {
-        score *= this.temporalDecay(fact.updatedAt || fact.createdAt)
-      }
-
-      // Length penalty：基于 matchText 长度
-      score *= Math.min(1.0, 300 / matchText.length)
-
-      scored.push({ ...fact, score })
-    }
-
-    scored.sort((a, b) => b.score - a.score)
+    const scored = this.scoreAdaptiveRRF(candidates, queryTokens)
 
     // 取 limit 条（不再做 relevance gate 和 content dedup）
     const results = scored.slice(0, limit)
@@ -506,6 +474,67 @@ export class FactRetriever {
     }))
   }
 
+  /**
+   * 自适应 RRF 融合：根据 FTS 归一化方差自动切换权重。
+   * - Normal FTS → weights: { fts: 0.4, sim: 0.4, trust: 0.2 }
+   * - LIKE fallback → weights: { fts: 0.0, sim: 0.7, trust: 0.3 }
+   */
+  private scoreAdaptiveRRF(candidates: FtsCandidate[], queryTokens: Set<string>): ScoredFact[] {
+    if (candidates.length === 0) return []
+
+    // 计算每个候选的 sim 分数
+    interface RichCandidate extends FtsCandidate {
+      simScore: number
+    }
+    const rich: RichCandidate[] = candidates.map(fact => {
+      const matchTokens = this.tokenize(fact.content)
+      const tagTokens = this.tokenize(fact.tags)
+      const allTokens = new Set([...matchTokens, ...tagTokens])
+      const jaccard = this.jaccardSimilarity(queryTokens, allTokens)
+      const containment = this.containmentScore(queryTokens, allTokens)
+      return { ...fact, simScore: 0.3 * jaccard + 0.7 * containment }
+    })
+
+    // 方差检测：判断是否为 LIKE fallback
+    const ftsNorms = rich.map(c => c.ftsRank)
+    const maxFts = Math.max(...ftsNorms)
+    const minFts = Math.min(...ftsNorms)
+    const isLikeFallback = (maxFts - minFts) < 0.001
+
+    const weights = isLikeFallback
+      ? { fts: 0.0, sim: 0.7, trust: 0.3 }
+      : { fts: 0.4, sim: 0.4, trust: 0.2 }
+
+    // 为每个信号排序并构建 factId → rank 映射（rank 1-based，值越大 rank 越小）
+    const byFts = [...rich].sort((a, b) => b.ftsRank - a.ftsRank)
+    const ftsRankMap = new Map<number, number>()
+    byFts.forEach((c, i) => ftsRankMap.set(c.factId, i + 1))
+
+    const bySim = [...rich].sort((a, b) => b.simScore - a.simScore)
+    const simRankMap = new Map<number, number>()
+    bySim.forEach((c, i) => simRankMap.set(c.factId, i + 1))
+
+    const byTrust = [...rich].sort((a, b) => b.trustScore - a.trustScore)
+    const trustRankMap = new Map<number, number>()
+    byTrust.forEach((c, i) => trustRankMap.set(c.factId, i + 1))
+
+    // RRF 融合：score = Σ w_i / (k + rank_i)
+    const k = this.rrfK
+    const scored: ScoredFact[] = rich.map(c => {
+      let score = 0
+      if (weights.fts > 0) {
+        score += weights.fts / (k + (ftsRankMap.get(c.factId) ?? rich.length))
+      }
+      score += weights.sim / (k + (simRankMap.get(c.factId) ?? rich.length))
+      score += weights.trust / (k + (trustRankMap.get(c.factId) ?? rich.length))
+      const { ftsRank, simScore, ...fact } = c
+      return { ...fact, score }
+    })
+
+    scored.sort((a, b) => b.score - a.score)
+    return scored
+  }
+
   /** 简单分词：空格/下划线/中英文标点分割 + 小写 + 中文 bigram */
   private tokenize(text: string): Set<string> {
     if (!text) return new Set()
@@ -546,21 +575,6 @@ export class FactRetriever {
       if (b.has(item)) hits++
     }
     return hits / a.size
-  }
-
-  /** 时间衰减: 0.5^(ageDays / halfLifeDays) */
-  private temporalDecay(timestampStr: string | null): number {
-    if (!this.halfLifeDays || !timestampStr) return 1.0
-
-    try {
-      const ts = new Date(timestampStr) // SQLite datetime 是本地时间
-      const ageMs = Date.now() - ts.getTime()
-      const ageDays = ageMs / 86400000
-      if (ageDays < 0) return 1.0
-      return Math.pow(0.5, ageDays / this.halfLifeDays)
-    } catch {
-      return 1.0
-    }
   }
 
   /** 判断查询是否为个人/身份相关（应触发 trust fallback） */

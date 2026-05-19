@@ -48,9 +48,8 @@ export interface ContradictOptions {
 
 /** 检索器配置 */
 export interface RetrieverOptions {
-  ftsWeight?: number
-  jaccardWeight?: number
-  temporalDecayHalfLife?: number
+  /** RRF 融合常数 k，公式 score = Σ w_i / (k + rank_i)，默认 10 */
+  rrfK?: number
 }
 
 /** fact_store 工具调用参数 */

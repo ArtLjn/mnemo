@@ -69,7 +69,7 @@ const minTrust = 0.3
 // -- Initialize store + retriever --
 const dbPath = join(homedir(), '.mnemo', 'facts.db')
 const store = new MemoryStore(dbPath)
-const retriever = new FactRetriever(store, { temporalDecayHalfLife: 30 })
+const retriever = new FactRetriever(store)
 
 // Startup maintenance
 store.decayTrustScores()
