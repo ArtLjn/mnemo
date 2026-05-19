@@ -6,6 +6,19 @@
   <strong>简体中文</strong> | <a href="./README.md">English</a>
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/npm/v/@morningljn/mnemo?color=%232F81F7&label=npm&style=flat-square" alt="npm version">
+  <img src="https://img.shields.io/badge/license-MIT-%232F81F7?style=flat-square" alt="license">
+  <img src="https://img.shields.io/badge/node-%3E%3D18-06b6d4?style=flat-square" alt="node version">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/MCP-Protocol-2F81F7?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMiIgaGVpZ2h0PSIxMiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjMiLz48cGF0aCBkPSJNMTIgMXY2bTAgNnY2bTExLTdoLTZNMSAxMmg2Ii8+PC9zdmc+" alt="MCP">
+  <img src="https://img.shields.io/badge/SQLite-FTS5-2F81F7?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite FTS5">
+  <img src="https://img.shields.io/badge/TypeScript-5.8-06b6d4?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Vitest-Test-06b6d4?style=flat-square&logo=vitest&logoColor=white" alt="Vitest">
+</p>
+
 ---
 
 ## 为什么需要 mnemo？
