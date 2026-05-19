@@ -1,6 +1,8 @@
 <p align="center">
-  <img src="./banner-v2.png" alt="mnemo" width="600">
+  <img src="./banner-v2.png" alt="mnemo" width="100%">
 </p>
+
+<h3 align="center">为 AI 编程助手提供持久、可搜索的结构化记忆</h3>
 
 <p align="center">
   <strong>简体中文</strong> | <a href="./README.md">English</a>
@@ -10,9 +12,6 @@
   <img src="https://img.shields.io/npm/v/@morningljn/mnemo?color=%232F81F7&label=npm&style=flat-square" alt="npm version">
   <img src="https://img.shields.io/badge/license-MIT-%232F81F7?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/node-%3E%3D18-06b6d4?style=flat-square" alt="node version">
-</p>
-
-<p align="center">
   <img src="https://img.shields.io/badge/MCP-Protocol-2F81F7?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMiIgaGVpZ2h0PSIxMiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjMiLz48cGF0aCBkPSJNMTIgMXY2bTAgNnY2bTExLTdoLTZNMSAxMmg2Ii8+PC9zdmc+" alt="MCP">
   <img src="https://img.shields.io/badge/SQLite-FTS5-2F81F7?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite FTS5">
   <img src="https://img.shields.io/badge/TypeScript-5.8-06b6d4?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
@@ -21,36 +20,37 @@
 
 ---
 
-## 为什么需要 mnemo？
-
 AI 编程助手在会话结束后会忘记所有内容。`CLAUDE.md` 只能存储静态规则，无法搜索或推理积累的知识。
 
-mnemo 为你的 AI 助手提供**可搜索、结构化的记忆层**，跨会话持久化：
+**mnemo** 为你的 AI 助手提供**可搜索、结构化的记忆层**，跨会话持久化。
 
-- **语义搜索** — FTS5 全文检索 + Jaccard 重排序 + 中英双语扩展
-- **会话预热** — MCP Resources 在会话启动时自动注入高频记忆，零工具调用
-- **查询提炼** — 搜索前自动剥离动作词和噪声词
-- **信任评分** — 事实随时间根据反馈和衰减获得或失去信任
-- **实体图谱** — 自动实体抽取，支持多跳关联查询
-- **矛盾检测** — 发现冲突事实并降级较旧的那条
-- **自动去重** — 三层去重机制（实体重叠、Jaccard 相似度、包含检测）
-- **LLM 驱动的 Dream** — 合并同主题、精简冗长内容、解决矛盾
+## 核心特性
+
+| | |
+|:---|:---|
+| **自适应 RRF 检索** | FTS5 全文检索 + 三路 RRF 融合排序（文本/相似度/信任）+ 自适应权重检测 |
+| **会话预热** | MCP Resources 在会话启动时自动注入高频记忆 — 零工具调用 |
+| **查询提炼** | 搜索前自动剥离动作词和噪声词 |
+| **信任评分** | 事实随时间根据反馈和衰减获得或失去信任 |
+| **实体图谱** | 自动实体抽取，支持多跳关联查询 |
+| **矛盾检测** | 发现冲突事实并降级较旧的那条 |
+| **自动去重** | 三层去重：实体重叠、Jaccard 相似度、包含检测 |
+| **LLM 驱动的 Dream** | 合并同主题事实、精简冗长内容、解决矛盾 |
 
 ## 快速开始
 
 ```bash
-# 安装
+# 全局安装
 npm install -g @morningljn/mnemo
 
-# 一键配置（注册 MCP + 写入规则 + 设置权限）
+# 一键配置：注册 MCP + 写入规则 + 设置权限
 mnemo-init
 ```
 
-重启你的 AI 助手即可拥有持久记忆。
+重启 AI 助手即可拥有持久记忆。
 
-### 手动配置
-
-如果你更喜欢手动配置：
+<details>
+<summary><strong>手动配置</strong></summary>
 
 **1. 注册 MCP 服务器：**
 
@@ -82,9 +82,7 @@ claude mcp add mnemo -- mnemo
 }
 ```
 
-### Codex
-
-添加到你的 Codex MCP 配置：
+**4. Codex 配置：**
 
 ```json
 {
@@ -96,14 +94,16 @@ claude mcp add mnemo -- mnemo
 }
 ```
 
+</details>
+
 ## 工具
 
 ### `fact_store`
 
-读写结构化事实的主工具，支持 12 种操作：
+读写结构化事实的主工具，支持 13 种操作：
 
 | 操作 | 说明 | 关键参数 |
-|------|------|----------|
+|:-----|:-----|:---------|
 | `add` | 添加事实（自动去重，相似则合并，单条 ≤300 字） | `content`、`category`、`tags` |
 | `search` | 关键词搜索（FTS5 + Jaccard 重排序） | `query`、`category`、`min_trust`、`limit` |
 | `probe` | 查找某实体的所有事实 | `entity`、`min_trust`、`limit` |
@@ -123,7 +123,7 @@ claude mcp add mnemo -- mnemo
 使用事实后评分。好事实上升，坏事实下降。
 
 | 操作 | 效果 |
-|------|------|
+|:-----|:-----|
 | `helpful` | +0.05 信任 |
 | `unhelpful` | -0.10 信任 |
 
@@ -141,12 +141,16 @@ mnemo-dream
 2. **精简** — LLM 压缩冗长内容，保留所有关键信息（URL、邮箱、数字、人名、配置参数）。
 
 **安全保护：**
+
 - 执行前自动备份（`~/.mnemo/backup/`）
 - 高信任分事实（> 0.8）受保护不被删除
 - 高频检索事实（> 100 次）受保护
 - LLM 不可用时自动降级到规则引擎
 
-**配置**（`~/.mnemo/config.json`）：
+<details>
+<summary><strong>Dream 配置</strong></summary>
+
+添加到 `~/.mnemo/config.json`：
 
 ```json
 {
@@ -156,12 +160,14 @@ mnemo-dream
 }
 ```
 
+</details>
+
 ## MCP Resources
 
 mnemo 提供 5 个全局类别资源，用于**零成本的会话预热**：
 
 | 资源 URI | 说明 |
-|----------|------|
+|:---------|:-----|
 | `mnemo://global/identity` | 身份事实（信任分前 10） |
 | `mnemo://global/coding_style` | 编码风格偏好 |
 | `mnemo://global/tool_pref` | 工具偏好 |
@@ -170,10 +176,30 @@ mnemo 提供 5 个全局类别资源，用于**零成本的会话预热**：
 
 MCP 客户端（Claude Code、Codex）在会话启动时自动获取这些资源，无需任何工具调用即可注入记忆。
 
+## 架构
+
+```
+┌───────────────────┐   stdio    ┌────────────┐   SQLite    ┌─────────────────────┐
+│   MCP Client      │◄─────────►│  mnemo     │◄───────────►│ ~/.mnemo/facts.db   │
+│ (Claude / Codex)  │   JSON    │  server    │             │                     │
+│                   │           └─────┬──────┘             │ Tables:             │
+│  Auto-fetch:      │                 │                    │   facts             │
+│  mnemo://global/* │      ┌──────────┼──────────┐         │   entities          │
+│  (session warmup) │      │          │          │         │   fact_entities     │
+└───────────────────┘      │          │          │         │   retrieval_log     │
+                           │          │          │         │ Indexes:            │
+                     Resources   Retriever   Dream        │   facts_fts (FTS5)  │
+                     (warmup,   (search,    Engine        │   idx_facts_trust   │
+                      cache)     probe,     (merge,       │   idx_facts_category│
+                                 reason,    compress)     └─────────────────────┘
+                                 refine,
+                                 RRF score)
+```
+
 ## 类别
 
 | 类别 | 说明 | 衰减率 |
-|------|------|--------|
+|:-----|:-----|:-------|
 | `identity` | 用户身份：姓名、角色、偏好 | 0.02/周 |
 | `coding_style` | 编码规范、命名、格式化 | 0.03/周 |
 | `tool_pref` | 工具和框架偏好 | 0.03/周 |
