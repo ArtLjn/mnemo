@@ -79,8 +79,8 @@ store.auditContradictions()
 process.nextTick(() => {
   try {
     const result = store.runLearning()
-    if (result.demoted > 0 || result.aged > 0 || result.long_facts.length > 0) {
-      console.error(`[mnemo:auto-learn] promoted=${result.promoted} demoted=${result.demoted} aged=${result.aged} long_facts=${result.long_facts.length}`)
+    if (result.demoted > 0 || result.aged > 0 || result.removed > 0 || result.long_facts.length > 0) {
+      console.error(`[mnemo:auto-learn] promoted=${result.promoted} demoted=${result.demoted} aged=${result.aged} removed=${result.removed} long_facts=${result.long_facts.length}`)
     }
   } catch (err) {
     console.error('[mnemo:auto-learn] error:', err)

@@ -743,6 +743,7 @@ export class MemoryStore {
     promoted: number
     demoted: number
     aged: number
+    removed: number
     unchanged: number
     long_facts: Array<{ id: number; content_length: number; penalty: number; has_summary: boolean }>
   } {
@@ -756,6 +757,7 @@ export class MemoryStore {
     let promoted = 0
     let demoted = 0
     let aged = 0
+    let removed = 0
     let unchanged = 0
     const longFacts: Array<{ id: number; content_length: number; penalty: number; has_summary: boolean }> = []
 
@@ -771,6 +773,11 @@ export class MemoryStore {
         const highFrequencyProtected = row.retrieval_count > 100
         if (rate < 0.05 && !highFrequencyProtected) {
           const newTrust = clampTrust(row.trust_score * 0.9)
+          if (newTrust <= MIN_SURVIVAL_TRUST) {
+            this.removeFact(row.fact_id)
+            removed++
+            continue
+          }
           this.db.prepare('UPDATE facts SET trust_score = ? WHERE fact_id = ?').run(newTrust, row.fact_id)
           demoted++
           changed = true
@@ -789,6 +796,11 @@ export class MemoryStore {
         if (daysSinceRetrieval > 60) {
           const currentTrust = this.db.prepare('SELECT trust_score FROM facts WHERE fact_id = ?').get(row.fact_id) as any
           const newTrust = clampTrust(currentTrust.trust_score * 0.95)
+          if (newTrust <= MIN_SURVIVAL_TRUST) {
+            this.removeFact(row.fact_id)
+            removed++
+            continue
+          }
           this.db.prepare('UPDATE facts SET trust_score = ? WHERE fact_id = ?').run(newTrust, row.fact_id)
           aged++
           changed = true
@@ -810,7 +822,7 @@ export class MemoryStore {
       }
     }
 
-    return { promoted, demoted, aged, unchanged, long_facts: longFacts }
+    return { promoted, demoted, aged, removed, unchanged, long_facts: longFacts }
   }
 
   /** 数据质量审计（只读，不修改数据） */
