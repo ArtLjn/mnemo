@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./banner.png" alt="mnemo" width="600">
+  <img src="./banner-v2.png" alt="mnemo" width="600">
 </p>
 
 <p align="center">
