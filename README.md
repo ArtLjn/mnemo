@@ -127,6 +127,26 @@ Rate a fact after use. Good facts rise, bad ones decay.
 | `helpful` | +0.05 trust |
 | `unhelpful` | -0.10 trust |
 
+## CLI Usage
+
+mnemo also provides a standalone CLI for interacting with your memory outside of Claude Code:
+
+```bash
+# Save a fact
+mnemo observe "Prefers Vim keybindings"
+
+# Search facts
+mnemo search "coding style"
+
+# Rate a fact (42 is an example fact ID)
+mnemo feedback 42 helpful
+
+# Review memory health
+mnemo review
+```
+
+The CLI shares the same SQLite database with the MCP server (WAL mode enables safe multi-process access).
+
 ## Dream Cycle
 
 mnemo includes an LLM-driven dream cycle to keep your memory clean and efficient:

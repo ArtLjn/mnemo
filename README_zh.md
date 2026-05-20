@@ -127,6 +127,26 @@ claude mcp add mnemo -- mnemo
 | `helpful` | +0.05 信任 |
 | `unhelpful` | -0.10 信任 |
 
+## CLI 使用
+
+mnemo 提供独立的 CLI 工具，用于在 Claude Code 之外直接与记忆数据库交互：
+
+```bash
+# 保存事实
+mnemo observe "用户偏好使用 Vim 模式"
+
+# 搜索记忆
+mnemo search "编码风格"
+
+# 评分事实（42 为示例 fact ID）
+mnemo feedback 42 helpful
+
+# 审查记忆健康度
+mnemo review
+```
+
+CLI 与 MCP server 共享同一个 SQLite 数据库（WAL 模式支持安全的多进程并发访问）。
+
 ## Dream 整理周期
 
 mnemo 内置 LLM 驱动的 dream 周期，保持记忆库整洁高效：
