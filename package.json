@@ -1,6 +1,6 @@
 {
   "name": "@morningljn/mnemo",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Structured fact memory MCP server — SQLite + FTS5, trust scoring, entity graph, bilingual retrieval for Claude Code & Codex",
   "type": "module",
   "main": "dist/server.js",
