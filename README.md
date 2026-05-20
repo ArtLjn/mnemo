@@ -55,7 +55,7 @@ Restart your AI assistant — that's it, it now has persistent memory.
 **1. Register MCP server:**
 
 ```bash
-claude mcp add mnemo -- mnemo-server
+claude mcp add --scope user mnemo -- mnemo-server
 ```
 
 **2. Add memory rules to `~/.claude/CLAUDE.md`:**

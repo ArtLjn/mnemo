@@ -55,7 +55,7 @@ mnemo-init
 **1. 注册 MCP 服务器：**
 
 ```bash
-claude mcp add mnemo -- mnemo-server
+claude mcp add --scope user mnemo -- mnemo-server
 ```
 
 **2. 在 `~/.claude/CLAUDE.md` 中添加记忆规则：**

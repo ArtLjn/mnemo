@@ -53,10 +53,10 @@ function fail(msg: string) {
 }
 
 // -- Step 1: Register MCP server --
-function registerMcp(scope: string = 'user') {
-  log('注册 MCP 服务器...')
+function registerMcp() {
+  log('注册 MCP 服务器（全局）...')
   try {
-    execSync(`claude mcp add --scope ${scope} mnemo -- mnemo-server`, {
+    execSync(`claude mcp add --scope user mnemo -- mnemo-server`, {
       stdio: 'pipe',
       timeout: 15000,
     })
@@ -166,14 +166,11 @@ function updatePermissions() {
 
 // -- Main --
 function main() {
-  const args = process.argv.slice(2)
-  const scope = args.includes('--project') ? 'project' : 'user'
-
   console.log('')
   console.log('\x1b[1m  mnemo init — 一键配置记忆系统\x1b[0m')
   console.log('')
 
-  registerMcp(scope)
+  registerMcp()
   writeClaudeMd()
   updatePermissions()
 
