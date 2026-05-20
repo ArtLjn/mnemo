@@ -56,7 +56,7 @@ function fail(msg: string) {
 function registerMcp(scope: string = 'user') {
   log('注册 MCP 服务器...')
   try {
-    execSync(`claude mcp add --scope ${scope} mnemo -- mnemo`, {
+    execSync(`claude mcp add --scope ${scope} mnemo -- mnemo-server`, {
       stdio: 'pipe',
       timeout: 15000,
     })
@@ -67,7 +67,7 @@ function registerMcp(scope: string = 'user') {
       warn('MCP 服务器已存在，跳过注册')
     } else {
       fail(`注册失败: ${stderr.slice(0, 200)}`)
-      fail('请手动运行: claude mcp add mnemo -- mnemo')
+      fail('请手动运行: claude mcp add mnemo -- mnemo-server')
     }
   }
 }
