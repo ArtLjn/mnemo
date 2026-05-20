@@ -90,17 +90,18 @@ process.nextTick(() => {
 // -- MCP Server --
 // 动态生成 instructions：将 identity resource 中的角色设定作为 system prompt 指令注入
 function buildInstructions(): string {
+  const protocol = `\n\n## 结构化记忆协议\n\n在对话过程中：\n- 发现新的用户习惯/偏好/工作流 → 调用 auto_observe 保存\n- 使用记忆后发现准确 → 调用 fact_feedback(helpful) 提升信任\n- 使用记忆后发现过时 → 调用 fact_feedback(unhelpful) 降低信任\n- 完成复杂任务后 → 检查是否有新习惯值得保存\n`
   try {
     const rm = new ResourceManager(store)
     const result = rm.readCategory('identity')
     const identityText = result.contents[0]?.text ?? ''
     if (identityText.length > 10) {
-      return identityText
+      return identityText + protocol
     }
   } catch {
-    // fallback：无 identity 数据时不注入
+    // fallback
   }
-  return ''
+  return protocol.trim()
 }
 
 const server = new McpServer(
@@ -120,6 +121,9 @@ server.tool(
     try {
       const a = args as unknown as FactStoreArgs
       const category = resolveCategory(a.category)
+
+      // CLI 写入后可能触发了缓存失效，先检查
+      resourceManager.checkInvalidate()
 
       switch (a.action) {
         case 'add': {

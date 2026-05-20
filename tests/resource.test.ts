@@ -56,6 +56,20 @@ describe('ResourceManager', () => {
     manager.invalidate()
     expect(manager.cacheSize()).toBe(0)
   })
+
+  it('appends action instructions for identity', () => {
+    store.addFact('AI角色设定：大名暖暖', 'identity')
+    const text = readResource('identity')
+    expect(text).toContain('## 行动指令')
+    expect(text).toContain('auto_observe(category="identity")')
+  })
+
+  it('appends action instructions for non-identity categories', () => {
+    store.addFact('用户偏好深色主题', 'tool_pref')
+    const text = readResource('tool_pref')
+    expect(text).toContain('## 行动指令')
+    expect(text).toContain('auto_observe(category="tool_pref")')
+  })
 })
 
 function readResource(category: string): string {

@@ -9,6 +9,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { MemoryStore } from './store.js'
 import type { FactCategory } from './types.js'
+import { statSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 
 const CATEGORIES: FactCategory[] = ['identity', 'coding_style', 'tool_pref', 'workflow', 'general']
 const RESOURCE_LIMIT = 15
@@ -21,6 +24,8 @@ export interface ResourceFact {
 
 export class ResourceManager {
   private cache = new Map<FactCategory, string>()
+  private lastInvalidatedAt = 0
+  private readonly invalidateFilePath = join(homedir(), '.mnemo', '.cache-invalidate')
 
   constructor(
     private store: MemoryStore,
@@ -54,6 +59,7 @@ export class ResourceManager {
   }
 
   private getFormattedFacts(category: FactCategory): string {
+    this.checkInvalidate()
     const cached = this.cache.get(category)
     if (cached) return cached
 
@@ -102,6 +108,14 @@ export class ResourceManager {
       }
     }
 
+    lines.push('')
+    lines.push('---')
+    lines.push('')
+    lines.push('## 行动指令')
+    lines.push('')
+    lines.push('- 若本次对话涉及角色设定或身份信息变更，请调用 `auto_observe(category="identity")` 保存')
+    lines.push('- 若本次对话涉及新的用户偏好或习惯，请调用 `auto_observe` 保存')
+
     return lines.join('\n')
   }
 
@@ -121,7 +135,35 @@ export class ResourceManager {
       lines.push(`- ${f.content}`)
     }
 
+    const actionMap: Record<string, string> = {
+      coding_style: '新的编码风格偏好',
+      tool_pref: '新的工具使用习惯',
+      workflow: '新的工作流模式',
+      general: '新的通用知识或偏好',
+    }
+    lines.push('')
+    lines.push('---')
+    lines.push('')
+    lines.push('## 行动指令')
+    lines.push('')
+    lines.push(`- 若本次对话涉及${actionMap[category] ?? '该类别的新信息'}，请调用 \`auto_observe(category="${category}")\` 保存`)
+
     return lines.join('\n')
+  }
+
+  checkInvalidate(): boolean {
+    try {
+      if (!existsSync(this.invalidateFilePath)) return false
+      const stat = statSync(this.invalidateFilePath)
+      if (stat.mtimeMs > this.lastInvalidatedAt) {
+        this.cache.clear()
+        this.lastInvalidatedAt = Date.now()
+        return true
+      }
+    } catch {
+      // 文件不存在或无法读取，忽略
+    }
+    return false
   }
 
   invalidate(): void {
