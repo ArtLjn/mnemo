@@ -34,22 +34,29 @@ function printError(message: string): void {
   process.exit(1)
 }
 
-function parseFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag)
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1]
+function splitFlags(rawArgs: string[]): { flags: Map<string, string>; positional: string[] } {
+  const flags = new Map<string, string>()
+  const positional: string[] = []
+  for (let i = 0; i < rawArgs.length; i++) {
+    if (rawArgs[i].startsWith('--') && i + 1 < rawArgs.length) {
+      flags.set(rawArgs[i], rawArgs[i + 1])
+      i++
+    } else {
+      positional.push(rawArgs[i])
+    }
   }
-  return undefined
+  return { flags, positional }
 }
 
 // -- Commands --
 
 function cmdObserve(args: string[]): void {
-  const content = args[0]
+  const { flags, positional } = splitFlags(args)
+  const content = positional[0]
   if (!content) printError('Usage: mnemo observe <content> [--category <cat>] [--tags <tags>]')
 
-  const category = resolveCategory(parseFlag(args, '--category'))
-  const tags = parseFlag(args, '--tags') ?? ''
+  const category = resolveCategory(flags.get('--category'))
+  const tags = flags.get('--tags') ?? ''
 
   const quality = scanContentQuality(content)
   if (!quality.passed) {
@@ -77,12 +84,15 @@ function cmdObserve(args: string[]): void {
 }
 
 function cmdSearch(args: string[]): void {
-  const query = args[0]
+  const { flags, positional } = splitFlags(args)
+  const query = positional[0]
   if (!query) printError('Usage: mnemo search <query> [--category <cat>] [--min-trust <n>] [--limit <n>]')
 
-  const category = parseFlag(args, '--category') ?? undefined
-  const minTrust = parseFloat(parseFlag(args, '--min-trust') ?? '0.3')
-  const limit = parseInt(parseFlag(args, '--limit') ?? '10', 10)
+  const category = flags.get('--category') ?? undefined
+  const rawMinTrust = parseFloat(flags.get('--min-trust') ?? '0.3')
+  const minTrust = isNaN(rawMinTrust) || rawMinTrust < 0 || rawMinTrust > 1 ? 0.3 : rawMinTrust
+  const rawLimit = parseInt(flags.get('--limit') ?? '10', 10)
+  const limit = isNaN(rawLimit) || rawLimit < 1 ? 10 : rawLimit
 
   const store = new MemoryStore(dbPath)
   const retriever = new FactRetriever(store)
@@ -108,8 +118,9 @@ function cmdSearch(args: string[]): void {
 }
 
 function cmdFeedback(args: string[]): void {
-  const factId = parseInt(args[0], 10)
-  const action = args[1]
+  const { positional } = splitFlags(args)
+  const factId = parseInt(positional[0], 10)
+  const action = positional[1]
   if (isNaN(factId) || !action || !['helpful', 'unhelpful'].includes(action)) {
     printError('Usage: mnemo feedback <fact_id> <helpful|unhelpful>')
   }
@@ -128,12 +139,14 @@ function cmdReview(args: string[]): void {
   const store = new MemoryStore(dbPath)
   try {
     const audit = store.runAudit()
-    store.auditContradictions()
+    const contradictions = store.auditContradictions()
     printResult({
       total_facts: audit.total_facts,
       long_without_summary: audit.long_without_summary,
       low_helpful_rate: audit.low_helpful_rate,
       aging_candidates: audit.aging_candidates,
+      contradictions_audited: contradictions.audited,
+      contradictions_demoted: contradictions.demoted,
     })
   } finally {
     store.close()
@@ -158,6 +171,24 @@ function main(): void {
     case 'review':
       cmdReview(args)
       break
+    case '--help':
+    case '-h':
+      console.log(`Usage: mnemo <command> [args...]
+
+Commands:
+  observe <content>     Save a fact (default category: workflow)
+  search <query>        Search facts by keyword
+  feedback <id> <type>  Rate a fact as helpful or unhelpful
+  review                Show audit report of memory health
+
+Options:
+  --category <cat>      Filter by category (identity, coding_style, tool_pref, workflow, general)
+  --tags <tags>         Comma-separated tags for observe
+  --min-trust <n>       Minimum trust score for search (default: 0.3)
+  --limit <n>           Max results for search (default: 10)
+`)
+      process.exit(0)
+      break
     default:
       console.log(`Usage: mnemo <command> [args...]
 
@@ -173,7 +204,7 @@ Options:
   --min-trust <n>       Minimum trust score for search (default: 0.3)
   --limit <n>           Max results for search (default: 10)
 `)
-      process.exit(command ? 1 : 0)
+      process.exit(1)
   }
 }
 
