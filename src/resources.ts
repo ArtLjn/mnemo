@@ -157,7 +157,7 @@ export class ResourceManager {
       const stat = statSync(this.invalidateFilePath)
       if (stat.mtimeMs > this.lastInvalidatedAt) {
         this.cache.clear()
-        this.lastInvalidatedAt = Date.now()
+        this.lastInvalidatedAt = stat.mtimeMs
         return true
       }
     } catch {
