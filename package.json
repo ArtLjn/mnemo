@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/server.js",
   "bin": {
-    "mnemo": "dist/server.js",
+    "mnemo": "dist/cli.js",
+    "mnemo-server": "dist/server.js",
     "mnemo-init": "dist/init.js",
     "mnemo-dream": "dist/dream.js"
   },
